@@ -1,7 +1,8 @@
 # FileRenamer 🚀
 
-**Outil multimédia** de renommage de fichiers avec interface graphique moderne.  
-*Optimisé Plex/Jellyfin/Kobo/Komga/Mylar3 — Vidéos, Mangas, Livres, Photos*
+# FileRenamer — Guide d'utilisation
+<img width="1403" height="894" alt="Mangas" src="https://github.com/user-attachments/assets/6b56deb5-fbbd-4cf7-8331-274ffc9b5a67" />
+<img width="1403" height="886" alt="Film" src="https://github.com/user-attachments/assets/102728cb-6eef-4beb-a80f-3053fffc700b" />
 
 ***
 
