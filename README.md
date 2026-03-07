@@ -6,12 +6,12 @@
 
 Films · Mangas · Livres · Photos
 
-[![Release](https://img.shields.io/github/v/release/TON_USER/FileRenamer?label=Derniere%20version&logo=github&color=f5a623)](https://github.com/TON_USER/FileRenamer/releases/latest)
+[![Release](https://img.shields.io/github/v/release/loic31000/FileRenamer?label=Derniere%20version&logo=github&color=f5a623)](https://github.com/loic31000/FileRenamer/releases/latest)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://python.org)
-[![Windows](https://img.shields.io/badge/Windows-10%2F11-0078d4?logo=windows)](https://github.com/TON_USER/FileRenamer/releases/latest)
+[![Windows](https://img.shields.io/badge/Windows-10%2F11-0078d4?logo=windows)](https://github.com/loic31000/FileRenamer/releases/latest)
 [![License](https://img.shields.io/badge/Licence-MIT-green)](LICENSE)
 
-[**Télécharger le .exe**](https://github.com/TON_USER/FileRenamer/releases/latest) · [Signaler un bug](https://github.com/TON_USER/FileRenamer/issues) · [Demander une fonctionnalité](https://github.com/TON_USER/FileRenamer/issues)
+[**Télécharger le .exe**](https://github.com/loic31000/FileRenamer/releases/latest) · [Signaler un bug](https://github.com/loic31000/FileRenamer/issues) · [Demander une fonctionnalité](https://github.com/loic31000/FileRenamer/issues)
 
 </div>
 
@@ -27,7 +27,7 @@ FileRenamer renomme automatiquement vos fichiers multimédia selon les conventio
 
 | Méthode | Lien |
 |---------|------|
-| **.exe autonome** (recommandé) | [GitHub Releases](https://github.com/TON_USER/FileRenamer/releases/latest) |
+| **.exe autonome** (recommandé) | [GitHub Releases](https://github.com/loic31000/FileRenamer/releases/latest) |
 | **Code source** (Python requis) | `git clone` ou télécharger le ZIP |
 
 > Le `.exe` est autonome, aucune installation de Python requise.
@@ -123,7 +123,7 @@ Date EXIF (prise de vue) si disponible, sinon date de modification du fichier.
 
 ### Option 1 — Executable .exe (recommandé)
 
-1. Télécharger `FileRenamer-vX.X.X-Windows.zip` depuis les [Releases](https://github.com/TON_USER/FileRenamer/releases/latest)
+1. Télécharger `FileRenamer-vX.X.X-Windows.zip` depuis les [Releases](https://github.com/loic31000/FileRenamer/releases/latest)
 2. Extraire le ZIP
 3. Double-cliquer sur `FileRenamer.exe`
 
@@ -134,7 +134,7 @@ Aucune installation requise. L'exe demande les droits admin automatiquement si n
 **Prérequis** : Python 3.8+ ([python.org](https://www.python.org/downloads/))
 
 ```bash
-git clone https://github.com/TON_USER/FileRenamer.git
+git clone https://github.com/loic31000/FileRenamer.git
 cd FileRenamer
 pip install pillow          # optionnel — apercu miniature + date EXIF
 python file_renamer.py
