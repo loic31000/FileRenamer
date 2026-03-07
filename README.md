@@ -25,12 +25,21 @@ FileRenamer renomme automatiquement vos fichiers multimédia selon les conventio
 
 ## Téléchargement
 
+<div align="center">
+
+### ⬇️ [Télécharger FileRenamer v1.0.0 — Windows (.zip)](https://github.com/loic31000/FileRenamer/releases/latest/download/FileRenamer-v1.0.0-Windows.zip)
+
+ou [voir toutes les versions](https://github.com/loic31000/FileRenamer/releases)
+
+</div>
+
 | Méthode | Lien |
 |---------|------|
-| **.exe autonome** (recommandé) | [GitHub Releases](https://github.com/loic31000/FileRenamer/releases/latest) |
-| **Code source** (Python requis) | `git clone` ou télécharger le ZIP |
+| **.exe autonome** (recommandé) | [FileRenamer-v1.0.0-Windows.zip](https://github.com/loic31000/FileRenamer/releases/latest/download/FileRenamer-v1.0.0-Windows.zip) |
+| **.exe seul** | [FileRenamer.exe](https://github.com/loic31000/FileRenamer/releases/latest/download/FileRenamer.exe) |
+| **Code source** (Python requis) | `git clone https://github.com/loic31000/FileRenamer.git` |
 
-> Le `.exe` est autonome, aucune installation de Python requise.
+> Le `.exe` est autonome — aucune installation de Python requise.
 
 ---
 
