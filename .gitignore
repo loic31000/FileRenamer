@@ -1,0 +1,130 @@
+# ═══════════════════════════════════════════════════════════════════
+#  FileRenamer — Python Windows GUI
+# ═══════════════════════════════════════════════════════════════════
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller (build exe)
+build/
+dist/
+*.exe
+FileRenamer.spec
+*.manifest
+
+# Environnements virtuels
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE / Éditeurs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vscode
+.idea
+.vscode/settings.json
+.idea/workspace.xml
+
+# OS Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+@eaDir
+
+# Logs et temporaires
+*.log
+logs/
+tmp/
+temp/
+logs/
+*.tmp
+.DS_Store
+
+# Tests / Debug
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.coverage.*
+coverage.xml
+*.cover
+*.pytest_cache
+hypothesis/
+
+# Documentation
+docs/_build/
+
+# Base de données
+*.db
+*.sqlite
+
+# Fichiers sensibles
+.env
+.env.local
+.env.*.local
+secrets.json
+
+# Archives
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Images générées
+screenshots/
+
+# Dossiers PyInstaller temporaires
+__pycache__/
+*.pyc
+
+# Fichiers binaires
+*.dll
+*.pyd
+
+# Windows
+# Installer files
+*.msi
+*.msix
+*.msm
+*.msp
+
+# Windows image file caches
+Thumbs.db
+ehthumbs.db
+
+# Folder config file
+[Dd]esktop.ini
+
+# Recycle Bin used on file shares
+$RECYCLE.BIN/
+
+# Windows shortcuts
+*.lnk
