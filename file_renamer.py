@@ -1,3 +1,11 @@
+"""
+╔══════════════════════════════════════════════════════════════════╗
+║              FileRenamer — Outil de renommage multimédia         ║
+║  Vidéos • Livres • Mangas (Kobo/PC) • Photos • Convention custom ║
+║  Windows — Python 3.8+  — Tkinter GUI                           ║
+╚══════════════════════════════════════════════════════════════════╝
+"""
+
 import os
 import re
 import sys
@@ -844,6 +852,30 @@ class App(tk.Tk):
         self._field(p, 'Série :', self.manga_series, hint='ex: One Piece')
         self._field(p, 'Année :', self.manga_year,   hint='ex: 1997')
 
+        # Avertissement Mylar : l'année est obligatoire
+        warn_frame = tk.Frame(p, bg=_PANEL)
+        warn_frame.pack(fill='x', padx=16, pady=(0,4))
+        self._mylar_warn = tk.Label(warn_frame,
+            text='⚠  Mylar3 : saisissez l\'annee - obligatoire pour le format (Serie (Annee) #001)',
+            font=F(9), fg=_ORANGE, bg=_PANEL,
+            wraplength=340, justify='left', anchor='w')
+
+        def _check_mylar_warn(*_):
+            if self.manga_mode.get() == 'mylar':
+                self._mylar_warn.pack(anchor='w', pady=2)
+            else:
+                self._mylar_warn.pack_forget()
+        self.manga_mode.trace_add('write', _check_mylar_warn)
+        self.manga_year.trace_add('write', lambda *_: (
+            self._mylar_warn.configure(
+                fg=_GREEN if self.manga_year.get().strip() else _ORANGE,
+                text='\u2713  Annee definie - format complet : Serie (Annee) #001'
+                     if self.manga_year.get().strip()
+                     else '\u26a0  Mylar3 : saisissez l annee - obligatoire pour le format (Serie (Annee) #001)'
+            ) if self.manga_mode.get() == 'mylar' else None
+        ))
+        _check_mylar_warn()
+
         self._sec(p, 'FORMATS', _PINK)
         self._fmt(p, [
             ('CBZ', self.manga_cbz, _PINK),
@@ -1046,12 +1078,21 @@ class App(tk.Tk):
             if self.manga_epub.get(): exts.add('.epub')
             files = self._collect(exts)
             mm, s, y = self.manga_mode.get(), self.manga_series.get(), self.manga_year.get()
+            mylar_no_year = False
             for fp in files:
                 fn = os.path.basename(fp)
                 if   mm == 'kobo':  new = engine.rename_manga_kobo(fn, s)
                 elif mm == 'pc':    new = engine.rename_manga_pc(fn, s)
-                else:               new = engine.rename_manga_mylar(fn, s, y)
+                else:
+                    new = engine.rename_manga_mylar(fn, s, y)
+                    # Vérifier si l'année est absente du résultat
+                    if not y.strip() and not engine.extract_year(fn):
+                        mylar_no_year = True
                 pairs.append((fp, new))
+            if mylar_no_year:
+                self.status_var.set(
+                    '\u26a0  Mylar3 : aucune annee trouvee - '
+                    'saisissez l annee dans le champ pour obtenir Serie (Annee) #001')
 
         elif mode == 'book':
             exts = set()
