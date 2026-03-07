@@ -1,11 +1,3 @@
-"""
-╔══════════════════════════════════════════════════════════════════╗
-║              FileRenamer — Outil de renommage multimédia         ║
-║  Vidéos • Livres • Mangas (Kobo/PC) • Photos • Convention custom ║
-║  Windows — Python 3.8+  — Tkinter GUI                           ║
-╚══════════════════════════════════════════════════════════════════╝
-"""
-
 import os
 import re
 import sys
@@ -163,22 +155,59 @@ class RenameEngine:
 
     # ─ Vidéo ──────────────────────────────────────────────────────
 
-    def rename_movie_plex(self, fp: str) -> str:
+    # Conventions film par logiciel
+    # Plex / Emby / Jellyfin : Titre (Année).ext
+    # Kodi                   : Titre (Année).ext  (idem, standard NFO)
+    # Infuse                 : Titre (Année).ext
+    # MediaPortal            : Titre (Année).ext
+    # Tous partagent le même format de base — différences sur le nom de dossier
+    VIDEO_CONVENTIONS = {
+        'plex':        ('Plex / Emby / Jellyfin', 'Titre (Année).ext'),
+        'kodi':        ('Kodi / XBMC',             'Titre (Année).ext'),
+        'infuse':      ('Infuse / Apple TV',        'Titre (Année).ext'),
+        'mediaportal': ('MediaPortal',              'Titre.ext'),
+    }
+    SERIES_CONVENTIONS = {
+        'plex':        ('Plex / Emby / Jellyfin', 'Titre - S01E01.ext'),
+        'kodi':        ('Kodi / XBMC',             'Titre S01E01.ext'),
+        'infuse':      ('Infuse / Apple TV',        'Titre - S01E01.ext'),
+        'mediaportal': ('MediaPortal',              'Titre_S01E01.ext'),
+    }
+
+    def rename_movie(self, fp: str, convention: str = 'plex') -> str:
         p = Path(fp)
         title = self.clean_title(p.name)
         year  = self.extract_year(p.stem)
-        base  = f"{title} ({year})" if year else title
-        return self.safe_filename(base + p.suffix.lower())
+        ext   = p.suffix.lower()
+        if convention == 'mediaportal':
+            base = title
+        else:
+            base = f"{title} ({year})" if year else title
+        return self.safe_filename(base + ext)
 
-    def rename_series_plex(self, fp: str) -> str:
+    # Alias pour compat
+    def rename_movie_plex(self, fp: str) -> str:
+        return self.rename_movie(fp, 'plex')
+
+    def rename_series(self, fp: str, convention: str = 'plex') -> str:
         p = Path(fp)
         s, e  = self.extract_season_episode(p.stem)
         title = self.clean_title(p.name)
+        ext   = p.suffix.lower()
         if s is not None and e is not None:
-            return self.safe_filename(f"{title} - S{s:02d}E{e:02d}{p.suffix.lower()}")
+            ep_str = f"S{s:02d}E{e:02d}"
+            if convention == 'kodi':
+                return self.safe_filename(f"{title} {ep_str}{ext}")
+            elif convention == 'mediaportal':
+                return self.safe_filename(f"{title}_S{s:02d}E{e:02d}{ext}")
+            else:  # plex, infuse
+                return self.safe_filename(f"{title} - {ep_str}{ext}")
         elif e is not None:
-            return self.safe_filename(f"{title} - E{e:03d}{p.suffix.lower()}")
-        return self.safe_filename(title + p.suffix.lower())
+            return self.safe_filename(f"{title} - E{e:03d}{ext}")
+        return self.safe_filename(title + ext)
+
+    def rename_series_plex(self, fp: str) -> str:
+        return self.rename_series(fp, 'plex')
 
     # ─ Manga ──────────────────────────────────────────────────────
 
@@ -216,16 +245,41 @@ class RenameEngine:
 
     # ─ Livre ──────────────────────────────────────────────────────
 
-    def rename_book(self, fp: str, author: str = '') -> str:
-        """Auteur - Titre (Année).ext"""
+    # Conventions livre par logiciel :
+    # Calibre           : Auteur - Titre (Année).ext   — standard bibliothèque
+    # Kobo              : Titre - Auteur.ext            — affiché sur liseuse
+    # Kindle            : Titre - Auteur.ext            — même format
+    # Adobe DE          : Auteur - Titre.ext            — sans année
+    # Moon+ Reader      : Titre (Année) - Auteur.ext   — mobile Android
+    BOOK_CONVENTIONS = {
+        'calibre':  ('Calibre',              'Auteur - Titre (Année).ext'),
+        'kobo':     ('Kobo (liseuse)',        'Titre - Auteur.ext'),
+        'kindle':   ('Kindle',               'Titre - Auteur.ext'),
+        'adobe':    ('Adobe Digital Editions','Auteur - Titre.ext'),
+    }
+
+    def rename_book(self, fp: str, author: str = '', convention: str = 'calibre') -> str:
         p     = Path(fp)
         title = self.clean_title(p.name)
         year  = self.extract_year(p.stem)
+        ext   = p.suffix.lower()
+        au    = self.safe_filename(author.strip().title()) if author.strip() else ''
         yr_s  = f" ({year})" if year else ''
-        if author.strip():
-            au = self.safe_filename(author.strip().title())
-            return self.safe_filename(f"{au} - {title}{yr_s}{p.suffix.lower()}")
-        return self.safe_filename(f"{title}{yr_s}{p.suffix.lower()}")
+
+        if convention == 'calibre':
+            if au:
+                return self.safe_filename(f"{au} - {title}{yr_s}{ext}")
+            return self.safe_filename(f"{title}{yr_s}{ext}")
+        elif convention in ('kobo', 'kindle'):
+            if au:
+                return self.safe_filename(f"{title} - {au}{ext}")
+            return self.safe_filename(f"{title}{ext}")
+        elif convention == 'adobe':
+            if au:
+                return self.safe_filename(f"{au} - {title}{ext}")
+            return self.safe_filename(f"{title}{ext}")
+        # fallback
+        return self.safe_filename(f"{title}{yr_s}{ext}")
 
     # ─ Photo ──────────────────────────────────────────────────────
 
@@ -382,7 +436,10 @@ class App(tk.Tk):
         self.recursive_var      = tk.BooleanVar(value=False)
         self.rename_folder_var  = tk.BooleanVar(value=False)
         self.video_mode         = tk.StringVar(value='film_plex')
+        self.video_conv         = tk.StringVar(value='plex')
         self.v_overwrite        = tk.BooleanVar(value=False)
+        self.v_multi_titles     = tk.BooleanVar(value=False)
+        self._multi_titles_data = {}   # {filepath: titre_forcé}
         self.manga_mode         = tk.StringVar(value='kobo')
         self.manga_series       = tk.StringVar()
         self.manga_year         = tk.StringVar()
@@ -391,6 +448,7 @@ class App(tk.Tk):
         self.manga_pdf          = tk.BooleanVar(value=True)
         self.manga_epub         = tk.BooleanVar(value=True)
         self.book_author        = tk.StringVar()
+        self.book_conv          = tk.StringVar(value='calibre')
         self.book_pdf           = tk.BooleanVar(value=True)
         self.book_epub          = tk.BooleanVar(value=True)
         self.book_mobi          = tk.BooleanVar(value=True)
@@ -667,11 +725,32 @@ class App(tk.Tk):
             'ex: Breaking Bad - S03E07.mkv',
             self.video_mode, 'serie_plex', BLUE)
 
+        self._section_title(p, 'Convention / Logiciel média')
+        self._radio_card(p, 'Plex · Emby · Jellyfin',
+            'Titre (2008).mkv  /  Titre - S01E02.mkv',
+            self.video_conv, 'plex', ACCENT)
+        self._radio_card(p, 'Kodi · XBMC',
+            'Titre (2008).mkv  /  Titre S01E02.mkv',
+            self.video_conv, 'kodi', BLUE)
+        self._radio_card(p, 'Infuse · Apple TV',
+            'Titre (2008).mkv  /  Titre - S01E02.mkv',
+            self.video_conv, 'infuse', GREEN)
+        self._radio_card(p, 'MediaPortal',
+            'Titre.mkv  /  Titre_S01E02.mkv',
+            self.video_conv, 'mediaportal', ORANGE)
+
+        self._section_title(p, 'Mode multi-titres  (films uniquement)')
+        self._hint_lbl(p, 'Cochez pour forcer un titre personnalisé par fichier')
+        f2 = tk.Frame(p, bg=CARD)
+        f2.pack(fill='x', padx=20, pady=2)
+        chk(f2, 'Activer le mode multi-titres',
+            self.v_multi_titles, fg=ACCENT).pack(anchor='w', pady=4)
+
         self._section_title(p, 'Options')
         f = tk.Frame(p, bg=CARD)
         f.pack(fill='x', padx=20, pady=4)
         chk(f, 'Écraser si la destination existe déjà',
-            self.v_overwrite).pack(anchor='w', pady=6)
+            self.v_overwrite).pack(anchor='w', pady=4)
 
         self._run_btn(p, 'video', 'Films & Séries')
 
@@ -707,8 +786,21 @@ class App(tk.Tk):
     # ── Page Livres & BD ─────────────────────────────────────────────
 
     def _page_book(self, p):
+        self._section_title(p, 'Logiciel / Liseuse')
+        self._radio_card(p, 'Calibre',
+            'ex: Tolkien - Le Seigneur des Anneaux (2001).epub',
+            self.book_conv, 'calibre', ACCENT)
+        self._radio_card(p, 'Kobo  (liseuse)',
+            'ex: Le Seigneur des Anneaux - Tolkien.epub',
+            self.book_conv, 'kobo', BLUE)
+        self._radio_card(p, 'Kindle',
+            'ex: Le Seigneur des Anneaux - Tolkien.epub',
+            self.book_conv, 'kindle', ORANGE)
+        self._radio_card(p, 'Adobe Digital Editions',
+            'ex: Tolkien - Le Seigneur des Anneaux.epub',
+            self.book_conv, 'adobe', GREEN)
         self._section_title(p, 'Informations')
-        self._hint_lbl(p, 'Résultat : Tolkien - Le Seigneur des Anneaux (2001).epub')
+        self._hint_lbl(p, 'Laissez vide → auteur extrait du nom de fichier si possible')
         self._field_row(p, 'Auteur :', self.book_author, hint='optionnel')
 
         self._section_title(p, 'Formats à traiter')
@@ -806,26 +898,116 @@ class App(tk.Tk):
         self.tree.tag_configure('error',  foreground=RED)
         self.tree.bind('<Double-1>', self._show_preview_popup)
 
-        # Barre d'actions
+        # Barre d'actions — 2 lignes pour éviter l'écrasement
+        tk.Frame(parent, bg=BORDER, height=1).pack(fill='x')
         act = tk.Frame(parent, bg=BG)
-        act.pack(fill='x', padx=10, pady=8)
+        act.pack(fill='x', padx=10, pady=(6,4))
 
+        # Ligne 1 : sélection + effacer
+        row1 = tk.Frame(act, bg=BG)
+        row1.pack(fill='x', pady=(0,4))
         self.sel_all_var = tk.BooleanVar(value=True)
-        cb = chk(act, '  Tout sélectionner', self.sel_all_var, fg=ACCENT)
+        cb = chk(row1, '  Tout sélectionner / désélectionner', self.sel_all_var, fg=ACCENT)
         cb.configure(command=self._toggle_select)
         cb.pack(side='left', padx=4)
+        btn(row1, '🗑  Effacer la liste', self._clear, bg=CARD).pack(side='left', padx=8)
+        btn(row1, '📋  Sauvegarder le rapport', self._export_log, bg=CARD).pack(side='right', padx=4)
 
-        btn(act, '🗑  Effacer', self._clear, bg=CARD).pack(side='left', padx=6)
-
-        self.apply_btn = btn(act,
+        # Ligne 2 : bouton principal
+        row2 = tk.Frame(act, bg=BG)
+        row2.pack(fill='x')
+        self.apply_btn = btn(row2,
             '✅  Renommer les fichiers sélectionnés',
-            self._apply, bg=GREEN, fg='#0a0d12', bold=True)
-        self.apply_btn.pack(side='right', padx=4)
+            self._apply, bg=GREEN, fg='#0a0d12', size=12, bold=True)
+        self.apply_btn.pack(fill='x', ipady=4)
         self.apply_btn.configure(state='disabled')
 
-        btn(act, '📋  Rapport', self._export_log, bg=CARD).pack(side='right', padx=6)
-
     # ── Logique ──────────────────────────────────────────────────────
+
+
+    def _run_multi_title_dialog(self, files: list, conv: str) -> list:
+        """Fenêtre de saisie multi-titres : une ligne par fichier."""
+        dlg = tk.Toplevel(self)
+        dlg.title('Multi-titres — Saisir les titres')
+        dlg.configure(bg=BG)
+        dlg.geometry('780x520')
+        dlg.resizable(True, True)
+        dlg.grab_set()
+
+        lbl(dlg, '  Saisissez le titre pour chaque fichier', 12, bold=True,
+            fg=ACCENT, bg=BG).pack(anchor='w', padx=16, pady=(14,4))
+        lbl(dlg, '  Laissez vide = titre extrait automatiquement du nom de fichier',
+            10, fg=MUTED, bg=BG).pack(anchor='w', padx=16, pady=(0,8))
+        tk.Frame(dlg, bg=BORDER, height=1).pack(fill='x')
+
+        # Zone scrollable
+        canvas = tk.Canvas(dlg, bg=CARD, highlightthickness=0)
+        sb = ttk.Scrollbar(dlg, orient='vertical', command=canvas.yview)
+        canvas.configure(yscrollcommand=sb.set)
+        sb.pack(side='right', fill='y')
+        canvas.pack(side='top', fill='both', expand=True)
+        inner = tk.Frame(canvas, bg=CARD)
+        win_id = canvas.create_window((0,0), window=inner, anchor='nw')
+        def _resize(e): canvas.itemconfig(win_id, width=e.width)
+        def _scroll(e): canvas.configure(scrollregion=canvas.bbox('all'))
+        canvas.bind('<Configure>', _resize)
+        inner.bind('<Configure>', _scroll)
+        def _mw(e): canvas.yview_scroll(int(-1*(e.delta/120)), 'units')
+        canvas.bind('<Enter>', lambda e: canvas.bind_all('<MouseWheel>', _mw))
+        canvas.bind('<Leave>', lambda e: canvas.unbind_all('<MouseWheel>'))
+
+        title_vars = []
+        year_vars  = []
+        for fp in files:
+            fn = os.path.basename(fp)
+            auto_title = engine.clean_title(fn)
+            auto_year  = engine.extract_year(fn)
+
+            row = tk.Frame(inner, bg=CARD2)
+            row.pack(fill='x', padx=12, pady=4)
+
+            lbl(row, fn, 9, fg=MUTED, bg=CARD2).pack(
+                anchor='w', padx=10, pady=(6,2))
+
+            fields = tk.Frame(row, bg=CARD2)
+            fields.pack(fill='x', padx=10, pady=(0,8))
+
+            tv = tk.StringVar(value=auto_title)
+            yv = tk.StringVar(value=auto_year)
+            title_vars.append(tv)
+            year_vars.append(yv)
+
+            lbl(fields, 'Titre :', 10, fg=MUTED, bg=CARD2).pack(side='left', padx=(0,4))
+            tk.Entry(fields, textvariable=tv, font=(FN,11),
+                bg='#0a0c14', fg=TEXT, insertbackground=ACCENT,
+                relief='flat', bd=5, width=32).pack(side='left', padx=(0,12))
+            lbl(fields, 'Année :', 10, fg=MUTED, bg=CARD2).pack(side='left', padx=(0,4))
+            tk.Entry(fields, textvariable=yv, font=(FN,11),
+                bg='#0a0c14', fg=TEXT, insertbackground=ACCENT,
+                relief='flat', bd=5, width=6).pack(side='left')
+
+        # Boutons
+        tk.Frame(dlg, bg=BORDER, height=1).pack(fill='x')
+        bar = tk.Frame(dlg, bg=BG)
+        bar.pack(fill='x', padx=16, pady=10)
+
+        result = []
+        def _ok():
+            for i, fp in enumerate(files):
+                p    = Path(fp)
+                t    = title_vars[i].get().strip() or engine.clean_title(p.name)
+                y    = year_vars[i].get().strip()  or engine.extract_year(p.stem)
+                base = f"{engine.safe_filename(t)} ({y})" if y else engine.safe_filename(t)
+                result.append((fp, base + p.suffix.lower()))
+            dlg.destroy()
+        def _cancel():
+            dlg.destroy()
+
+        btn(bar, '✅  Valider', _ok, bg=GREEN, fg='#0a0d12', bold=True).pack(side='right', padx=4)
+        btn(bar, 'Annuler', _cancel, bg=CARD).pack(side='right', padx=8)
+
+        dlg.wait_window()
+        return result
 
     def _browse_folder(self):
         d = filedialog.askdirectory(title='Choisir un dossier')
@@ -869,11 +1051,18 @@ class App(tk.Tk):
 
         if mode == 'video':
             files = self._collect(VIDEO_EXTS)
-            vm = self.video_mode.get()
-            for fp in files:
-                fn  = os.path.basename(fp)
-                new = engine.rename_movie_plex(fn) if vm == 'film_plex'                       else engine.rename_series_plex(fn)
-                pairs.append((fp, new))
+            vm   = self.video_mode.get()
+            conv = self.video_conv.get()
+            is_film = (vm == 'film_plex')
+            multi   = self.v_multi_titles.get() and is_film
+            if multi and files:
+                pairs = self._run_multi_title_dialog(files, conv)
+            else:
+                for fp in files:
+                    fn  = os.path.basename(fp)
+                    new = engine.rename_movie(fn, conv) if is_film \
+                          else engine.rename_series(fn, conv)
+                    pairs.append((fp, new))
 
         elif mode == 'manga':
             exts = set()
@@ -897,9 +1086,10 @@ class App(tk.Tk):
             if self.book_mobi.get(): exts.add('.mobi')
             if self.book_djvu.get(): exts.add('.djvu')
             files = self._collect(exts)
-            au = self.book_author.get()
+            au   = self.book_author.get()
+            conv = self.book_conv.get()
             for fp in files:
-                pairs.append((fp, engine.rename_book(os.path.basename(fp), au)))
+                pairs.append((fp, engine.rename_book(os.path.basename(fp), au, conv)))
 
         elif mode == 'photo':
             files = self._collect(IMAGE_EXTS)
@@ -932,12 +1122,55 @@ class App(tk.Tk):
             self.tree.insert('', 'end',
                 values=('  '+old_name, '  '+new_name, st), tags=(tag,))
 
-        # Dossier optionnel
+        # Dossier optionnel — nom adapté à la convention du genre
         self.folder_preview_data = []
         if self.rename_folder_var.get() and pairs:
             folder_path = self.folder_var.get().strip()
             folder_name = os.path.basename(folder_path)
-            new_folder  = engine.safe_filename(engine.clean_title(os.path.basename(pairs[0][0])))
+            first_file  = os.path.basename(pairs[0][0])
+            base_title  = engine.clean_title(first_file)
+            base_year   = engine.extract_year(first_file)
+
+            if mode == 'video':
+                conv = self.video_conv.get()
+                is_film = (self.video_mode.get() == 'film_plex')
+                if is_film:
+                    # Plex/Emby/Infuse : dossier = Titre (Année)
+                    # Kodi              : dossier = Titre (Année)
+                    # MediaPortal       : dossier = Titre
+                    if conv == 'mediaportal':
+                        new_folder = engine.safe_filename(base_title)
+                    else:
+                        new_folder = engine.safe_filename(
+                            f"{base_title} ({base_year})" if base_year else base_title)
+                else:
+                    # Séries : dossier = nom de la série (sans episode)
+                    new_folder = engine.safe_filename(base_title)
+            elif mode == 'manga':
+                # Kobo : Série - T001 → dossier = Série
+                # PC   : Série v001   → dossier = Série
+                # Mylar: Série (an)   → dossier = Série (an)
+                mm = self.manga_mode.get()
+                yr = self.manga_year.get().strip() or base_year
+                series = self.manga_series.get().strip() or base_title
+                if mm == 'mylar' and yr:
+                    new_folder = engine.safe_filename(f"{series} ({yr})")
+                else:
+                    new_folder = engine.safe_filename(series)
+            elif mode == 'book':
+                au   = self.book_author.get().strip()
+                conv = self.book_conv.get()
+                yr   = base_year
+                # Calibre/Adobe : dossier = Auteur (si dispo)
+                # Kobo/Kindle   : dossier = Titre
+                # Moon+         : dossier = Titre (Année)
+                if conv in ('calibre', 'adobe') and au:
+                    new_folder = engine.safe_filename(au.title())
+                else:
+                    new_folder = engine.safe_filename(base_title)
+            else:
+                new_folder = engine.safe_filename(base_title)
+
             if new_folder and new_folder != folder_name:
                 dest_folder = os.path.join(os.path.dirname(folder_path), new_folder)
                 if os.path.exists(dest_folder):

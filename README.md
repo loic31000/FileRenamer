@@ -1,110 +1,131 @@
-# FileRenamer
+# FileRenamer 🚀
 
 # FileRenamer — Guide d'utilisation
 <img width="1403" height="894" alt="Mangas" src="https://github.com/user-attachments/assets/6b56deb5-fbbd-4cf7-8331-274ffc9b5a67" />
 <img width="1403" height="886" alt="Film" src="https://github.com/user-attachments/assets/102728cb-6eef-4beb-a80f-3053fffc700b" />
 
-## Prérequis
+***
 
-- Python 3.8 ou supérieur : https://www.python.org/downloads/
-- Pillow (optionnel, pour la date EXIF des photos) :
-  ```
-  pip install pillow
-  ```
+## ✨ **Ce qu'il fait**
 
-## Lancement
+| 🎬 **Vidéos** | 📚 **Livres** | 🎌 **Mangas** | 🖼️ **Photos** |
+|---------------|---------------|---------------|---------------|
+| `Film (2023).mkv` | `Auteur - Titre (2020).epub` | `Série - T001.cbz` | `20231225_143022.jpg` |
+| `Série - S01E05.mkv` | | `Série v001.cbz` | `20231225_vacances.jpg` |
 
-Double-cliquez sur `lancer.bat` ou exécutez dans un terminal :
+**+ Mode template personnalisé** `{titre} ({année}){ext}`
+
+***
+
+## 🛠️ **Stack technique**
+
 ```
+🎨 Python 3.8+  •  Tkinter GUI  •  Windows-first
+📦 Pillow (optionnel EXIF)
+🔨 PyInstaller → FileRenamer.exe (UAC Admin auto)
+```
+
+***
+
+## 🚀 **Installation rapide**
+
+### **1️⃣ Cloner**
+```bash
+git clone https://github.com/<ton-user>/FileRenamer.git
+cd FileRenamer
+```
+
+### **2️⃣ Dépendances**
+```bash
+pip install pillow  # ← Photos EXIF (optionnel)
+```
+
+### **3️⃣ Lancer**
+```
+👆 Double-clic `lancer.bat`  (Windows)
+OR
 python file_renamer.py
 ```
 
----
+***
 
-## Conventions de nommage
+## ⚡ **Créer l'exécutable (.exe)**
 
-### 🎬 Vidéos — Plex / Kodi / Emby / Jellyfin
-| Type    | Résultat                        |
-|---------|---------------------------------|
-| Film    | `Titre (2023).mkv`              |
-| Série   | `Titre - S01E05.mkv`            |
+**`creer_exe.bat`** → `dist/FileRenamer.exe` en **1 clic**  
+*(Auto Python + PyInstaller + UAC Admin)*
 
-Le script détecte automatiquement l'année et le numéro S01E05 depuis
-le nom d'origine (ex: `titre.2023.1080p.bluray.mkv` → `Titre (2023).mkv`).
-
----
-
-### 🎌 Mangas
-
-#### Kobo (liseuse)
+```bash
+# Ou manuellement
+pip install pyinstaller
+python -m PyInstaller --onefile --windowed --uac-admin --name FileRenamer file_renamer.py
 ```
-One Piece - T001.cbz
-One Piece - T002.cbz
+
+***
+
+## 🎯 **Conventions de nommage**
+
+### **Vidéos Plex/Jellyfin** 🎥
 ```
-→ Tri parfait sur la liseuse, reconnu par la bibliothèque Kobo.
-
-#### PC / Komga / Kavita
+titre.2023.1080p.mkv  →  Titre (2023).mkv
+serie.s01e05.mkv      →  Serie - S01E05.mkv
 ```
-One Piece v001.cbz
-One Piece v002.cbz
+
+### **Mangas** 💎
 ```
-→ Standard reconnu par la plupart des readers CBZ/CBR sur PC.
-
-#### Mylar3 / ComicRack
+🔴 Kobo : One Piece - T001.cbz
+🔵 PC/Komga : One Piece v001.cbz  
+🟠 Mylar3 : One Piece (1997) #001.cbz
 ```
-One Piece (1997) #001.cbz
-One Piece (1997) #002.cbz
+
+### **Photos** 📸
 ```
-→ Compatible ComicInfo.xml, Mylar3, ComicRack.
-
-**Astuce :** Si tous tes fichiers sont du même manga, remplis le champ
-"Nom de série" pour forcer le nom (sinon il est extrait automatiquement).
-
----
-
-### 📚 Livres
+IMG_20231225.jpg  →  20231225_143022.jpg
++ suffixe : *_vacances.jpg*
 ```
-Auteur - Titre (2020).epub
-Auteur - Titre (2020).pdf
+
+### **Template custom** ⚙️
 ```
-Laisse "Auteur" vide si tu ne veux pas le préfixe.
-
----
-
-### 🖼️ Photos
+Variables : {titre} {année} {saison} {episode} {tome} {auteur} {date}
+Exemple : {auteur} - {titre} ({année}) # {tome}{ext}
 ```
-20231225_143022.jpg
-20231225_143022_vacances.jpg   ← avec préfixe "vacances"
+
+***
+
+## 🎮 **Utilisation (5s)**
+
 ```
-Utilise la date EXIF si Pillow est installé, sinon la date du fichier.
+1️⃣ Choisir dossier (…👆)
+2️⃣ Mode (Films/Mangas/Photos...)
+3️⃣ 🔍 Prévisualiser
+4️⃣ ✅ cocher/décocher → Appliquer
+5️⃣ 📋 Rapport (txt/json)
+```
 
----
+**Bonus :** Double-clic ligne → aperçu image/CBZ
 
-### ⚙️ Convention personnalisée
-Variables disponibles dans le template :
-| Variable   | Contenu                          |
-|------------|----------------------------------|
-| `{titre}`  | Titre extrait du nom             |
-| `{année}`  | Année détectée (ex: 2023)        |
-| `{ext}`    | Extension (.mkv, .cbz…)          |
-| `{saison}` | Numéro de saison (01)            |
-| `{episode}`| Numéro d'épisode (05)            |
-| `{tome}`   | Numéro de tome (001)             |
-| `{auteur}` | Auteur saisi manuellement        |
-| `{date}`   | Date du fichier (YYYYMMDD_HHMMSS)|
-| `{prefixe}`| Préfixe saisi manuellement       |
+***
 
-Exemple de template : `{auteur} - {titre} ({année}){ext}`
+## 🛡️ **Gestion erreurs**
 
----
+| Statut | Signification |
+|--------|---------------|
+| ✓ prêt | OK à renommer |
+| ⚠ existe | Fichier déjà présent |
+| ═ inchangé | Nom identique |
+| ❌ accès refusé | Relance Admin |
 
-## Utilisation
+**Auto-relance UAC** si besoin !
 
-1. **Choisir un dossier** avec le bouton `…`
-2. **Sélectionner l'onglet** correspondant au type de fichier
-3. Cliquer sur **🔍 Prévisualiser**
-4. **Vérifier** les renommages proposés dans le tableau
-5. **Décocher** les lignes à ignorer si besoin
-6. Cliquer sur **✅ Appliquer le renommage**
+***
 
-Le bouton "Exporter log" permet de sauvegarder la liste (.txt ou .json).
+## 📦 **Fichiers du projet**
+
+```
+FileRenamer/
+├── file_renamer.py     # 🎨 Application principale
+├── lancer.bat          # 🚀 Launcher auto Python
+├── creer_exe.bat       # 🔨 Build exe 1-clic
+└── README.md           # 📖 Ce fichier
+```
+
+***
