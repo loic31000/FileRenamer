@@ -12,7 +12,6 @@ build/
 release/
 
 # Icônes générées (garder .ico et _48.png, ignorer les autres)
-icon_256.png
 /tmp/
 
 # Environnements virtuels
