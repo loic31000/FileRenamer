@@ -2,71 +2,115 @@
 
 # FileRenamer
 
-**Outil de renommage multimédia Windows**
+**Outil de renommage multimédia Windows**  
+Scraper TMDb · AniList · Open Library intégré
 
-Films · Mangas · Livres · Photos
+Films · Séries · Anime · Mangas · Livres · Photos
 
 [![Release](https://img.shields.io/github/v/release/loic31000/FileRenamer?label=Derniere%20version&logo=github&color=f5a623)](https://github.com/loic31000/FileRenamer/releases/latest)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&logoColor=white)](https://python.org)
 [![Windows](https://img.shields.io/badge/Windows-10%2F11-0078d4?logo=windows)](https://github.com/loic31000/FileRenamer/releases/latest)
 [![License](https://img.shields.io/badge/Licence-MIT-green)](LICENSE)
 
-[**Télécharger le .exe**](https://github.com/loic31000/FileRenamer/releases/latest) · [Signaler un bug](https://github.com/loic31000/FileRenamer/issues) · [Demander une fonctionnalité](https://github.com/loic31000/FileRenamer/issues)
+[**⬇️ Télécharger .exe**](https://github.com/loic31000/FileRenamer/releases/latest) · [🐛 Signaler un bug](https://github.com/loic31000/FileRenamer/issues) · [💡 Demander une fonctionnalité](https://github.com/loic31000/FileRenamer/issues)
 
 </div>
 
 ---
 
-![Interface Films](screenshot_films.png)
+![FileRenamer v2 — Films](screenshot_films_v2.png)
 
-FileRenamer renomme automatiquement vos fichiers multimédia selon les conventions des logiciels les plus populaires. Interface sombre moderne, **prévisualisation obligatoire** avant application — zéro risque de perte.
+FileRenamer renomme automatiquement vos fichiers multimédia selon les conventions des logiciels les plus populaires. **Scraper intégré** : détecte et vérifie le titre officiel via TMDb, AniList et Open Library. **Prévisualisation obligatoire** avant application — zéro risque de perte.
 
 ---
 
-## Téléchargement
+## ⬇️ Téléchargement
+
+<div align="center">
+
+### [Télécharger FileRenamer v2.0.0 — Windows (.zip)](https://github.com/loic31000/FileRenamer/releases/latest/download/FileRenamer-v2.0.0-Windows.zip)
+
+ou [voir toutes les versions](https://github.com/loic31000/FileRenamer/releases)
+
+</div>
 
 | Méthode | Lien |
 |---------|------|
-| **.exe autonome** (recommandé) | [GitHub Releases](https://github.com/loic31000/FileRenamer/releases/latest) |
-| **Code source** (Python requis) | `git clone` ou télécharger le ZIP |
+| **.exe autonome** (recommandé) | [FileRenamer-v2.0.0-Windows.zip](https://github.com/loic31000/FileRenamer/releases/latest/download/FileRenamer-v2.0.0-Windows.zip) |
+| **.exe seul** | [FileRenamer.exe](https://github.com/loic31000/FileRenamer/releases/latest/download/FileRenamer.exe) |
+| **Code source Python** | `git clone https://github.com/loic31000/FileRenamer.git` |
 
-> Le `.exe` est autonome, aucune installation de Python requise.
+> Aucune installation requise — l'exe est autonome. Python recommandé pour les utilisateurs avancés.
+
+---
+
+## ✨ Nouveautés v2.0
+
+### 🔍 Scraper automatique
+- **Films / Séries** → [TMDb](https://www.themoviedb.org) — clé API gratuite requise
+- **Anime** → TMDb + fallback [AniList](https://anilist.co) automatique
+- **Mangas** → [AniList](https://graphql.anilist.co) GraphQL — **sans clé API**
+- **Livres** → [Open Library](https://openlibrary.org) — **sans clé API**
+- Bannière avec menu déroulant des résultats + bouton Corriger
+- Se déclenche automatiquement à l'ouverture du dossier
+
+### 🎌 Mode Anime
+Nouveau type dédié aux séries animées — numérotation 3 chiffres (`S01E007`), recherche TMDb + fallback AniList.
+
+### 🐛 Bugs corrigés
+- **WinError 5 NAS/réseau** : triple méthode `os.rename → shutil.move → copy+delete`
+- **Title case** : `Game of Thrones` au lieu de `Game Of Thrones`
+- **Tirets releases** : `one-piece-tome-84.cbz` → titre `"One Piece"` correct
+- **Auteur livres** : extraction auto depuis `"Tolkien - Titre.epub"`
+- **safe_filename** : caractères remplacés par espace (plus de tirets parasites)
+
+→ Voir [CHANGELOG.md](CHANGELOG.md) pour le détail complet.
 
 ---
 
 ## Fonctionnalités
 
-| Mode | Conventions supportées |
-|------|------------------------|
-| 🎬 Films & Séries | Plex · Emby · Jellyfin · Kodi · Infuse · MediaPortal |
-| 🎌 Mangas | Kobo (liseuse) · PC/Komga/Kavita · Mylar3/ComicRack |
-| 📚 Livres & BD | Calibre · Kobo · Kindle · Adobe Digital Editions |
-| 🖼️ Photos | Renommage par date EXIF ou date fichier |
-| ⚙️ Personnalisé | Template libre avec variables |
+| Mode | Scraper | Conventions |
+|------|---------|-------------|
+| 🎬 Films | TMDb | Plex · Emby · Jellyfin · Kodi · Infuse · MediaPortal |
+| 📺 Séries TV | TMDb | Plex · Emby · Jellyfin · Kodi · Infuse · MediaPortal |
+| 🎌 Série Animée | TMDb + AniList | Idem + numérotation 3 chiffres |
+| 📚 Mangas | AniList | Kobo · PC/Komga/Kavita · Mylar3/ComicRack |
+| 📖 Livres & BD | Open Library | Calibre · Kobo · Kindle · Adobe Digital Editions |
+| 🖼️ Photos | — | Renommage par date EXIF ou date fichier |
+| ⚙️ Personnalisé | — | Template libre avec variables `{titre}` `{année}` `{tome}`... |
 
-- **Prévisualisation avant application** — dry-run obligatoire, aucune surprise
-- **Mode multi-titres** — saisir manuellement le titre de chaque film
-- **Renommage du dossier parent** — adapté automatiquement à la convention choisie
-- **Aperçu miniature** — double-clic sur une image ou CBZ pour voir la couverture
-- **Sous-dossiers récursifs** — traitement en profondeur optionnel
-- **Export rapport** — log `.txt` ou `.json` de chaque opération
-- **Gestion admin Windows** — détection et relance UAC si accès refusé
+**Également :**
+- Prévisualisation avant application — dry-run, aucune surprise
+- Mode multi-titres Films (saisie manuelle)
+- Renommage du dossier parent
+- Aperçu miniature (double-clic : image, CBZ)
+- Sous-dossiers récursifs
+- Export rapport `.txt` ou `.json`
+- Génération `.nfo` Kodi/TMDb
+- Relance automatique avec droits admin Windows (UAC)
 
 ---
 
 ## Captures d'écran
 
-### Films & Séries — Convention Plex
+### Films avec scraper TMDb
+![Films](screenshot_films_v2.png)
 
-![Films & Séries](screenshot_films.png)
+### Mangas avec scraper AniList
+![Mangas](screenshot_v2.png)
 
-Renommage de 11 films depuis un dossier `D:/FILMS`. Détection automatique du titre et de l'année depuis des noms bruts (encodeur, qualité, source...).
+---
 
-### Mangas — Convention Kobo
+## Configuration API TMDb
 
-![Mangas](screenshot_manga.png)
+Le scraper Films & Séries nécessite une clé API TMDb **gratuite** :
 
-Renommage de 42 tomes Dragon Ball au format Kobo `Dragon Ball - T001.cbr`. Le nom de série est saisi manuellement, le numéro de tome est extrait automatiquement.
+1. Créer un compte sur [themoviedb.org](https://www.themoviedb.org)
+2. **Paramètres → API** → Demander une clé Developer
+3. Dans FileRenamer → onglet **⚙ Paramètres** → coller la clé → **Tester la connexion**
+
+> **AniList** (mangas/anime) et **Open Library** (livres) fonctionnent **sans clé API**.
 
 ---
 
@@ -80,8 +124,9 @@ Renommage de 42 tomes Dragon Ball au format Kobo `Dragon Ball - T001.cbr`. Le no
 | Kodi · XBMC | `The Dark Knight (2008).mkv` |
 | Infuse · Apple TV | `The Dark Knight (2008).mkv` |
 | MediaPortal | `The Dark Knight.mkv` |
+| Kodi / LibreELEC (TMDb) | `The.Dark.Knight.2008.mkv` |
 
-### Séries TV
+### Séries TV & Anime
 
 | Logiciel | Résultat |
 |----------|---------|
@@ -89,6 +134,8 @@ Renommage de 42 tomes Dragon Ball au format Kobo `Dragon Ball - T001.cbr`. Le no
 | Kodi · XBMC | `Breaking Bad S03E07.mkv` |
 | Infuse · Apple TV | `Breaking Bad - S03E07.mkv` |
 | MediaPortal | `Breaking Bad_S03E07.mkv` |
+| Anime (3 chiffres) | `Demon Slayer - S01E007.mkv` |
+| Double épisode | `Naruto - S02E012-E013.mkv` |
 
 ### Mangas
 
@@ -98,7 +145,7 @@ Renommage de 42 tomes Dragon Ball au format Kobo `Dragon Ball - T001.cbr`. Le no
 | PC · Komga · Kavita | `One Piece v042.cbz` |
 | Mylar3 · ComicRack | `One Piece (1997) #042.cbz` |
 
-> **Note Mylar3** : l'année est obligatoire pour le format complet. Saisissez-la dans le champ prévu, sinon le résultat sera `One Piece #042.cbz` sans l'année.
+> **Mylar3** : l'année est obligatoire. Saisissez-la dans le champ Année.
 
 ### Livres & BD
 
@@ -109,25 +156,15 @@ Renommage de 42 tomes Dragon Ball au format Kobo `Dragon Ball - T001.cbr`. Le no
 | Kindle | `Le Seigneur des Anneaux - Tolkien.epub` |
 | Adobe Digital Editions | `Tolkien - Le Seigneur des Anneaux.epub` |
 
-### Photos
-
-```
-20231225_143022_vacances.jpg
-```
-
-Date EXIF (prise de vue) si disponible, sinon date de modification du fichier.
-
 ---
 
 ## Installation
 
 ### Option 1 — Executable .exe (recommandé)
 
-1. Télécharger `FileRenamer-vX.X.X-Windows.zip` depuis les [Releases](https://github.com/loic31000/FileRenamer/releases/latest)
+1. Télécharger `FileRenamer-v2.0.0-Windows.zip` depuis les [Releases](https://github.com/loic31000/FileRenamer/releases/latest)
 2. Extraire le ZIP
-3. Double-cliquer sur `FileRenamer.exe`
-
-Aucune installation requise. L'exe demande les droits admin automatiquement si nécessaire.
+3. Double-cliquer `FileRenamer.exe`
 
 ### Option 2 — Code source Python
 
@@ -136,38 +173,48 @@ Aucune installation requise. L'exe demande les droits admin automatiquement si n
 ```bash
 git clone https://github.com/loic31000/FileRenamer.git
 cd FileRenamer
-pip install pillow          # optionnel — apercu miniature + date EXIF
+pip install pillow          # optionnel — aperçu miniature + date EXIF
 python file_renamer.py
 ```
 
 ---
 
-## Utilisation
+## Utilisation rapide
 
-1. **Choisir le dossier** à traiter (champ en haut)
-2. **Sélectionner le mode** dans la barre latérale gauche (🎬 🎌 📚 🖼️ ⚙️)
-3. **Choisir la convention** (Plex, Kobo, Calibre...)
-4. Cliquer **Analyser** → prévisualisation dans le tableau
-5. Vérifier *Nom original* / *Nouveau nom*
+1. Cliquer **📁 Dossier** (ou **🎬 Fichiers** pour une sélection manuelle)
+2. Sélectionner le mode dans la barre latérale gauche
+3. Le scraper se déclenche → **confirmer** ou **corriger** le titre dans la bannière
+4. Choisir la convention (Plex, Kobo, Calibre...)
+5. Cliquer **Analyser** → vérifier la prévisualisation
 6. Cliquer **Renommer les fichiers sélectionnés**
 
-### Statuts
+---
 
-| Couleur | Signification |
-|---------|---------------|
-| 🟢 Vert | Prêt à renommer |
-| ⚪ Gris | Nom inchangé |
-| 🟠 Orange | Fichier destination existant |
-| 🔵 Cyan | Déjà renommé |
-| 🔴 Rouge | Erreur |
+## Problèmes fréquents
 
-### Mode multi-titres (Films)
+### WinError 5 — Accès refusé (NAS, partage réseau)
 
-Cochez **"Mode multi-titres"** pour saisir manuellement le titre et l'année de chaque film avant la prévisualisation. Utile quand les noms de fichiers sont trop dégradés pour l'extraction automatique.
+**v2 : triple méthode automatique** — la plupart des cas sont résolus sans intervention.
 
-### Aperçu miniature
+Si l'erreur persiste :
+1. Fermez les apps qui lisent les fichiers (CDisplayEx, VLC, Kobo...)
+2. Cliquez ⚠ Admin dans le header pour relancer en administrateur
+3. Vérifiez les droits SMB du partage (lecture+écriture requis)
+4. Dernier recours : `attrib -r "E:\MANGAS\*" /s` dans un terminal admin
 
-Double-cliquez sur une ligne pour afficher la miniature d'une image ou la couverture d'un CBZ. Nécessite Pillow (`pip install pillow`).
+### Le scraper ne trouve rien
+
+- **Films** : vérifiez la clé API TMDb dans Paramètres → Tester la connexion
+- **Mangas/Anime** : AniList est gratuit — vérifiez votre connexion internet
+- Utilisez **✎** dans la bannière pour corriger la query manuellement
+
+### Titre mal extrait
+
+Le moteur retire automatiquement : qualité (`1080p`, `4K`), source (`BluRay`, `WEBRip`), codec (`x264`, `HEVC`), langue (`FRENCH`, `MULTI`), groupes release (`-gismo65`, `-YTS`...). Si le résultat est mauvais, utilisez le **mode multi-titres** ou saisissez manuellement dans le champ Série.
+
+### Mylar3 — année manquante
+
+Si le champ Année est vide, le résultat sera `Série #001.cbz`. Saisissez l'année — l'interface affiche un avertissement orange.
 
 ---
 
@@ -177,11 +224,10 @@ Double-cliquez sur une ligne pour afficher la miniature d'une image ou la couver
 pip install pyinstaller
 ```
 
-Puis double-cliquer sur `build_release.bat` — il compile le `.exe`, crée un dossier `release/` et une archive ZIP prête pour GitHub Releases.
-
-Ou manuellement :
+Double-cliquer sur `build_release.bat` — demande la version, compile, crée le ZIP pour GitHub Releases.
 
 ```bash
+# Ou manuellement :
 python -m PyInstaller --onefile --windowed --uac-admin --name FileRenamer file_renamer.py
 ```
 
@@ -191,71 +237,28 @@ python -m PyInstaller --onefile --windowed --uac-admin --name FileRenamer file_r
 
 ```
 FileRenamer/
-├── file_renamer.py          # Application principale (Python 3.8+)
-├── build_release.bat        # Script de build + packaging release
-├── README.md                # Ce fichier
-├── screenshot_films.png     # Capture Films & Séries
-└── screenshot_manga.png     # Capture Mangas
+├── file_renamer.py       # Application principale (~2500 lignes, Python 3.8+)
+├── build_release.bat     # Build + packaging release GitHub
+├── CHANGELOG.md          # Historique des versions
+├── README.md             # Ce fichier
+├── .gitignore
+├── screenshot_films_v2.png
+└── screenshot_v2.png
 ```
-
----
-
-## Architecture
-
-```
-RenameEngine                      Moteur de renommage (pur Python, sans GUI)
-  clean_title()                   Nettoie le titre (bruit encodeur...)
-  extract_year()                  Extrait l'annee (19xx / 20xx)
-  extract_season_episode()        Detecte S01E02 / 1x05
-  extract_volume()                Detecte tome/vol/T15/#018
-  rename_movie(convention)        Film selon convention
-  rename_series(convention)       Serie selon convention
-  rename_manga_kobo/pc/mylar()    Manga selon lecteur
-  rename_book(author, convention) Livre selon logiciel
-  rename_photo(prefix, exif)      Photo par date
-  rename_custom(template)         Template personnalise
-
-App (tk.Tk)                       Interface graphique
-  _build_header()                 Header avec dossier source
-  _build_nav()                    Navigation laterale iconique
-  _build_all_pages()              Pages des 5 modes
-  _run_preview(mode)              Previsualisation dry-run
-  _apply()                        Application du renommage
-  _multi_title_dialog()           Dialogue multi-titres films
-  _show_preview_popup()           Apercu miniature CBZ/image
-```
-
----
 
 ## Dépendances
 
 | Package | Usage | Obligatoire |
 |---------|-------|-------------|
-| `tkinter` | Interface graphique | ✅ (stdlib Python) |
+| `tkinter` | Interface graphique | ✅ stdlib Python |
 | `pillow` | Aperçu miniature, date EXIF | ⬜ Optionnel |
 | `rarfile` | Aperçu couverture CBR | ⬜ Optionnel |
 | `pyinstaller` | Compilation .exe | ⬜ Build only |
 
----
-
-## Problèmes fréquents
-
-### WinError 5 — Accès refusé
-
-Windows bloque le renommage de certains fichiers (lecture seule, verrouillés).
-
-**Solutions :**
-1. Fermez les applications qui lisent les fichiers (CDisplayEx, VLC, Kobo...)
-2. Relancez en administrateur (bouton ⚠ dans le header)
-3. Retirez l'attribut lecture seule : `attrib -r "E:\MANGAS\*" /s`
-
-### Titre mal extrait
-
-Le moteur retire automatiquement les mots-clés d'encodage (1080p, BluRay, FRENCH, x264...). Si le titre reste mauvais, utilisez le **mode multi-titres** pour le saisir manuellement.
-
-### Mylar3 sans année
-
-Si vos fichiers ne contiennent pas d'année dans leur nom et que le champ Année est vide, le résultat sera `Série #001.cbz` sans l'année. Saisissez l'année manuellement — l'interface affiche un avertissement orange pour vous le rappeler.
+**APIs externes (stdlib urllib — aucune dépendance pip) :**
+- [TMDb API v3](https://developer.themoviedb.org) — Films, Séries — clé gratuite requise
+- [AniList GraphQL](https://graphql.anilist.co) — Manga, Anime — sans clé
+- [Open Library](https://openlibrary.org/developers/api) — Livres — sans clé
 
 ---
 
@@ -267,6 +270,6 @@ MIT — libre d'utilisation, modification et distribution.
 
 <div align="center">
 
-Fait avec Python · Tkinter · 2026
+Fait avec Python · Tkinter · TMDb · AniList · Open Library · 2026
 
 </div>

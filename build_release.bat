@@ -1,21 +1,20 @@
 @echo off
 chcp 65001 >nul
-title FileRenamer - Build Release
+title FileRenamer - Build Release v2
 color 0A
 
-:: Se placer dans le dossier du .bat (gere les espaces)
 cd /d "%~dp0"
 
 echo.
 echo  ================================================
-echo   FileRenamer - Build Release GitHub
+echo   FileRenamer v2 - Build Release GitHub
 echo  ================================================
 echo.
 
-:: Version
-set VERSION=1.0.0
-set /p VERSION="Version (defaut: 1.0.0, appuyez Entree) : "
-if "%VERSION%"=="" set VERSION=1.0.0
+:: Version par défaut
+set VERSION=2.0.0
+set /p VERSION="Version (defaut: 2.0.0, appuyez Entree) : "
+if "%VERSION%"=="" set VERSION=2.0.0
 echo.
 echo  Version : v%VERSION%
 echo.
@@ -52,7 +51,7 @@ echo [OK] Python : %PYTHON%
 :: PyInstaller
 %PYTHON% -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
-    echo Installation PyInstaller...
+    echo  Installation PyInstaller...
     %PYTHON% -m pip install pyinstaller --quiet
     if errorlevel 1 (
         echo [ERREUR] Impossible d'installer PyInstaller.
@@ -63,16 +62,23 @@ echo [OK] PyInstaller disponible
 
 :: Nettoyage
 echo.
-echo  Compilation en cours...
-if exist dist   rmdir /s /q dist
-if exist build  rmdir /s /q build
+echo  Nettoyage et compilation...
+if exist dist          rmdir /s /q dist
+if exist build         rmdir /s /q build
 if exist FileRenamer.spec del /q FileRenamer.spec
 
-:: Compilation
-%PYTHON% -m PyInstaller --onefile --windowed --uac-admin --name FileRenamer --clean file_renamer.py
+:: Compilation — sans console, avec demande UAC au lancement
+%PYTHON% -m PyInstaller ^
+    --onefile ^
+    --windowed ^
+    --uac-admin ^
+    --name FileRenamer ^
+    --clean ^
+    file_renamer.py
+
 if errorlevel 1 (
     echo.
-    echo [ERREUR] Compilation echouee. Voir les messages ci-dessus.
+    echo [ERREUR] Compilation echouee.
     pause & exit /b 1
 )
 echo [OK] EXE : dist\FileRenamer.exe
@@ -81,13 +87,18 @@ echo [OK] EXE : dist\FileRenamer.exe
 set "RELEASE_DIR=%~dp0release\FileRenamer-v%VERSION%"
 if exist "%~dp0release" rmdir /s /q "%~dp0release"
 mkdir "%RELEASE_DIR%"
-copy "%~dp0dist\FileRenamer.exe" "%RELEASE_DIR%\FileRenamer.exe" >nul
-copy "%~dp0README.md"            "%RELEASE_DIR%\README.md"       >nul
-echo [OK] Fichiers copies
+
+copy "%~dp0dist\FileRenamer.exe"         "%RELEASE_DIR%\FileRenamer.exe"         >nul
+copy "%~dp0README.md"                    "%RELEASE_DIR%\README.md"               >nul
+copy "%~dp0CHANGELOG.md"                 "%RELEASE_DIR%\CHANGELOG.md"            >nul
+if exist "%~dp0screenshot_films_v2.png"  copy "%~dp0screenshot_films_v2.png"     "%RELEASE_DIR%\"  >nul
+if exist "%~dp0screenshot_v2.png"        copy "%~dp0screenshot_v2.png"            "%RELEASE_DIR%\"  >nul
+echo [OK] Fichiers copies dans release\
 
 :: ZIP
 echo  Creation du ZIP...
-powershell -NoProfile -Command "Compress-Archive -Path '%RELEASE_DIR%\*' -DestinationPath '%~dp0release\FileRenamer-v%VERSION%-Windows.zip' -Force"
+powershell -NoProfile -Command ^
+    "Compress-Archive -Path '%RELEASE_DIR%\*' -DestinationPath '%~dp0release\FileRenamer-v%VERSION%-Windows.zip' -Force"
 if errorlevel 1 (
     echo [ERREUR] Impossible de creer le ZIP.
     pause & exit /b 1
@@ -96,10 +107,19 @@ echo [OK] ZIP : release\FileRenamer-v%VERSION%-Windows.zip
 
 echo.
 echo  ================================================
-echo   Termine ! Fichiers a uploader sur GitHub :
+echo   Termine !
 echo.
-echo   dist\FileRenamer.exe
-echo   release\FileRenamer-v%VERSION%-Windows.zip
+echo   Fichiers a uploader sur GitHub Releases :
+echo.
+echo     dist\FileRenamer.exe
+echo     release\FileRenamer-v%VERSION%-Windows.zip
+echo.
+echo   Commandes Git pour la release :
+echo.
+echo     git add .
+echo     git commit -m "Release v%VERSION%"
+echo     git tag v%VERSION%
+echo     git push origin main --tags
 echo  ================================================
 echo.
 pause

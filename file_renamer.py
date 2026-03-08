@@ -13,6 +13,9 @@ import json
 import ctypes
 import shutil
 import stat
+import threading
+import urllib.request
+import urllib.parse
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
@@ -72,51 +75,110 @@ C = {
 
 class RenameEngine:
 
+    _LOWER_WORDS = {
+        'a','an','the','and','but','or','nor','at','by','for','in',
+        'of','on','to','up','as','de','du','des','le','la','les',
+        'un','une','et','ou','en','au','aux','sur','par','dans',
+        'avec','sans','sous','x','vs',
+    }
+
+    @staticmethod
+    def smart_title(text: str) -> str:
+        words = text.split()
+        result = []
+        for i, w in enumerate(words):
+            if i == 0 or w.lower() not in RenameEngine._LOWER_WORDS:
+                result.append(w.capitalize())
+            else:
+                result.append(w.lower())
+        return ' '.join(result)
+
     @staticmethod
     def clean_title(raw_name: str) -> str:
-        name = Path(raw_name).stem
-        name = re.sub(r'[._]', ' ', name)
-        name = re.sub(r'[\(\[\{][^\)\]\}]*[\)\]\}]', ' ', name)
-        # Retire les patterns épisode/saison et numéros de tome du titre
-        name = re.sub(r'\b[Ss]\d{1,2}[Ee]\d{1,2}\b', '', name)
-        name = re.sub(r'\b\d{1,2}[xX]\d{1,2}\b', '', name)
-        name = re.sub(r'\b[Ee]p?\d{1,3}\b', '', name, flags=re.IGNORECASE)
-        name = re.sub(r'(?:tome|vol(?:ume)?)[.\s_-]?\d{1,4}', '', name, flags=re.IGNORECASE)
-        name = re.sub(r'(?<=[_\s\-\.#])([tTvV])\d{1,3}(?![a-zA-Z])', '', name)
-        name = re.sub(r'#\d{1,4}', '', name)
-        name = re.sub(r'[\s_-]\d{1,4}$', '', name)
-        tokens = name.split()
-        cleaned = []
-        for tok in tokens:
-            low = tok.lower().strip('.-_')
-            if low in NOISE_WORDS:
-                break
-            if re.match(r'^(19|20)\d{2}$', tok):
-                break
-            cleaned.append(tok)
-        result = ' '.join(cleaned).strip()
-        return re.sub(r'\s+', ' ', result).title()
+        q, _ = RenameEngine.build_query(raw_name)
+        return RenameEngine.smart_title(q) if q else ""
 
     @staticmethod
     def extract_year(raw_name: str) -> str:
-        m = re.search(r'(19|20)\d{2}', raw_name)
-        return m.group(0) if m else ''
+        _, y = RenameEngine.build_query(raw_name)
+        if y: return y
+        m = re.search(r"(19|20)\d{2}", raw_name)
+        return m.group(0) if m else ""
+
+    @staticmethod
+    def build_query(raw_name: str):
+        name = Path(raw_name).stem if ("." in raw_name and "/" not in raw_name and chr(92) not in raw_name) else raw_name
+        year = ""
+        m = re.search(r"[\s._\-\(]((19|20)\d{2})[\s._\-\)]", name)
+        if m:
+            year = m.group(1)
+        else:
+            m = re.search(r"[-._\s]((19|20)\d{2})$", name)
+            if m: year = m.group(1)
+
+        # ── Normaliser TOUS les séparateurs -> espace ──────────────
+        # points séparateurs (pas d'extension)
+        if name.count(".") > 1 and " " not in name:
+            name = name.replace(".", " ")
+        else:
+            name = re.sub(r"(?<=\w)\.(?=\w)", " ", name)
+            name = re.sub(r"\.", " ", name)
+        name = name.replace("_", " ")
+        # tirets isolés : "one-piece" → "one piece"  (sauf tiret dans un mot composé court)
+        name = re.sub(r"(?<=\w)-(?=\w)", " ", name)
+
+        # ── Retirer blocs entre parentheses/crochets ──────────────
+        name = re.sub(r"[\(\[\{][^\)\]\}]*[\)\]\}]", " ", name)
+
+        # ── Retirer numéros d'épisode/volume/tome ─────────────────
+        name = re.sub(r"\b[Ss]\d{1,2}[Ee]\d{1,3}(?:[-\s]?[Ee]\d{1,3})?\b", "", name)
+        name = re.sub(r"\b\d{1,2}[xX]\d{1,2}\b", "", name)
+        name = re.sub(r"\b[Ee]p(?:isode)?\s*\d{1,3}\b", "", name, flags=re.IGNORECASE)
+        name = re.sub(r"\b(?:tome|vol(?:ume)?)\s*\d{1,4}\b", "", name, flags=re.IGNORECASE)
+        name = re.sub(r"\bv\d{1,3}\b", "", name)
+        name = re.sub(r"\bt\d{1,3}\b", "", name, flags=re.IGNORECASE)
+        name = re.sub(r"#\d{1,4}", "", name)
+        name = re.sub(r"\s+\d{1,4}$", "", name)
+
+        # ── Retirer URLs et groupes release ───────────────────────
+        name = re.sub(r"\b\w+ Www\b", "", name, flags=re.IGNORECASE)
+        name = re.sub(r"\b\w+\.(?:com|fr|net|org|tv)\b", "", name, flags=re.IGNORECASE)
+
+        # ── Couper sur premier mot bruit ou année ─────────────────
+        tokens = name.split()
+        cleaned = []
+        for i, tok in enumerate(tokens):
+            low = re.sub(r"[^a-z0-9]", "", tok.lower())
+            if low in NOISE_WORDS: break
+            if i > 0 and re.match(r"^(19|20)\d{2}$", tok): break
+            cleaned.append(tok)
+
+        result = " ".join(cleaned)
+        # Retirer tirets résiduels en début/fin
+        result = re.sub(r"\s*[-–—]+\s*$", "", result)
+        result = re.sub(r"^\s*[-–—]+\s*", "", result)
+        result = re.sub(r"\s+", " ", result).strip()
+        return result, year
 
     @staticmethod
     def extract_season_episode(raw_name: str):
+        # Double episode : S01E01E02 ou S01E01-E02
+        m = re.search(r'[Ss](\d{1,2})[Ee](\d{1,3})[-]?[Ee](\d{1,3})', raw_name)
+        if m:
+            return int(m.group(1)), int(m.group(2)), int(m.group(3))
         patterns = [
-            r'[Ss](\d{1,2})[Ee](\d{1,2})',
+            r'[Ss](\d{1,2})[Ee](\d{1,3})',
             r'(\d{1,2})[xX](\d{1,2})',
             r'[Ss]eason\s*(\d{1,2})\s*[Ee]p(?:isode)?\s*(\d{1,2})',
         ]
         for p in patterns:
             m = re.search(p, raw_name)
             if m:
-                return int(m.group(1)), int(m.group(2))
+                return int(m.group(1)), int(m.group(2)), None
         m = re.search(r'(?:[Ee]p?|episode\s*)(\d{1,3})', raw_name, re.IGNORECASE)
         if m:
-            return None, int(m.group(1))
-        return None, None
+            return None, int(m.group(1)), None
+        return None, None, None
 
     @staticmethod
     def extract_volume(raw_name: str):
@@ -125,7 +187,7 @@ class RenameEngine:
             r'(?<=[_\s\-\.#])([tT])(\d{1,3})(?![a-zA-Z])',  # _T15, -T03
             r'(?<=[_\s\-\.#])([vV])(\d{1,3})(?![a-zA-Z])',  # _v7, _V007
             r'#(\d{1,4})',                                # #018
-            r'[\s_-](\d{1,4})$',                         # bleach_018 (fin de nom)
+            r'[\s_.-](\d{1,4})$',                        # bleach_018, One.Piece.042
         ]
         for i, p in enumerate(patterns):
             m = re.search(p, raw_name, re.IGNORECASE)
@@ -137,9 +199,9 @@ class RenameEngine:
 
     @staticmethod
     def safe_filename(name: str) -> str:
-        name = re.sub(r'[<>:"/\\|?*]', '-', name)
+        name = re.sub(r'[<>:"/\\|?*]', ' ', name)
+        name = re.sub(r'  +', ' ', name)
         return name.strip('. ')
-
     @staticmethod
     def get_exif_date(filepath: str) -> str:
         if not PIL_OK:
@@ -174,15 +236,26 @@ class RenameEngine:
         'kodi':        ('Kodi / XBMC',             'Titre (Année).ext'),
         'infuse':      ('Infuse / Apple TV',        'Titre (Année).ext'),
         'mediaportal': ('MediaPortal',              'Titre.ext'),
+        'tmdb':        ('Kodi/LibreELEC TMDb',       'Titre.Annee.ext'),
     }
     SERIES_CONVENTIONS = {
         'plex':        ('Plex / Emby / Jellyfin', 'Titre - S01E01.ext'),
         'kodi':        ('Kodi / XBMC',             'Titre S01E01.ext'),
         'infuse':      ('Infuse / Apple TV',        'Titre - S01E01.ext'),
         'mediaportal': ('MediaPortal',              'Titre_S01E01.ext'),
+        'tmdb':        ('Kodi/LibreELEC TMDb',       'Titre.S01E01.ext'),
     }
 
     def rename_movie(self, fp: str, convention: str = 'plex') -> str:
+        # tmdb : Titre.Annee.ext (points, pas d'espaces)
+        if convention == 'tmdb':
+            p     = Path(fp)
+            title = self.clean_title(p.name)
+            year  = self.extract_year(p.stem)
+            t_dots = title.replace(' ', '.')
+            if year:
+                return f"{t_dots}.{year}{p.suffix.lower()}"
+            return f"{t_dots}{p.suffix.lower()}"
         p = Path(fp)
         title = self.clean_title(p.name)
         year  = self.extract_year(p.stem)
@@ -197,14 +270,24 @@ class RenameEngine:
     def rename_movie_plex(self, fp: str) -> str:
         return self.rename_movie(fp, 'plex')
 
-    def rename_series(self, fp: str, convention: str = 'plex') -> str:
+    def rename_series(self, fp: str, convention: str = 'plex',
+                      anime: bool = False) -> str:
         p = Path(fp)
-        s, e  = self.extract_season_episode(p.stem)
-        title = self.clean_title(p.name)
-        ext   = p.suffix.lower()
+        s, e, e2 = self.extract_season_episode(p.stem)
+        title    = self.clean_title(p.name)
+        ext      = p.suffix.lower()
+        ep_w     = 3 if anime else 2   # 3 chiffres pour anime
         if s is not None and e is not None:
-            ep_str = f"S{s:02d}E{e:02d}"
-            if convention == 'kodi':
+            if e2 is not None:
+                # Double episode
+                ep_str = f"S{s:02d}E{e:0{ep_w}d}-E{e2:0{ep_w}d}"
+            else:
+                ep_str = f"S{s:02d}E{e:0{ep_w}d}"
+            if convention == 'tmdb':
+                # Points entre mots, structure Kodi/TMDb
+                t_dots = title.replace(' ', '.')
+                return f"{t_dots}.{ep_str}{ext}"
+            elif convention == 'kodi':
                 return self.safe_filename(f"{title} {ep_str}{ext}")
             elif convention == 'mediaportal':
                 return self.safe_filename(f"{title}_S{s:02d}E{e:02d}{ext}")
@@ -213,6 +296,34 @@ class RenameEngine:
         elif e is not None:
             return self.safe_filename(f"{title} - E{e:03d}{ext}")
         return self.safe_filename(title + ext)
+
+
+    def generate_nfo(self, folder: str, nfo_type: str = 'tvshow',
+                     title: str = '', tmdb_id: str = '') -> str:
+        """Genere un fichier .nfo Kodi/TMDb dans le dossier donne."""
+        if nfo_type == 'tvshow':
+            content = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n'
+            content += '<tvshow>\n'
+            if title:
+                content += f'  <title>{title}</title>\n'
+            if tmdb_id.strip():
+                content += f'  <tmdbid>{tmdb_id.strip()}</tmdbid>\n'
+                content += f'  <uniqueid type="tmdb" default="true">{tmdb_id.strip()}</uniqueid>\n'
+            content += '</tvshow>\n'
+            nfo_path = os.path.join(folder, 'tvshow.nfo')
+        else:  # movie
+            content = '<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>\n'
+            content += '<movie>\n'
+            if title:
+                content += f'  <title>{title}</title>\n'
+            if tmdb_id.strip():
+                content += f'  <tmdbid>{tmdb_id.strip()}</tmdbid>\n'
+                content += f'  <uniqueid type="tmdb" default="true">{tmdb_id.strip()}</uniqueid>\n'
+            content += '</movie>\n'
+            nfo_path = os.path.join(folder, 'movie.nfo')
+        with open(nfo_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return nfo_path
 
     def rename_series_plex(self, fp: str) -> str:
         return self.rename_series(fp, 'plex')
@@ -306,7 +417,7 @@ class RenameEngine:
         extra = extra or {}
         title = self.clean_title(p.name)
         year  = self.extract_year(p.stem)
-        s, e  = self.extract_season_episode(p.stem)
+        s, e, _  = self.extract_season_episode(p.stem)
         vol   = self.extract_volume(p.stem)
         date  = self.get_file_date(fp)
         mapping = {
@@ -364,6 +475,163 @@ def check_file_writable(filepath: str) -> str:
 
 
 engine = RenameEngine()
+
+# ═══════════════════════════════════════════════════════════════════
+#  SCRAPERS  TMDb (films/séries/anime)  +  AniList (manga)
+# ═══════════════════════════════════════════════════════════════════
+
+class TMDbScraper:
+    """Interroge l'API TMDb v3 pour films, séries et anime."""
+
+    BASE = 'https://api.themoviedb.org/3'
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self._cache  = {}          # {url: data}
+
+    def _get(self, endpoint: str, params: dict) -> dict:
+        params['api_key']  = self.api_key
+        params['language'] = 'fr-FR'
+        qs  = urllib.parse.urlencode(params)
+        url = f"{self.BASE}{endpoint}?{qs}"
+        if url in self._cache:
+            return self._cache[url]
+        try:
+            req  = urllib.request.Request(url,
+                headers={'User-Agent': 'FileRenamer/1.0'})
+            resp = urllib.request.urlopen(req, timeout=8)
+            data = json.loads(resp.read().decode('utf-8'))
+            self._cache[url] = data
+            return data
+        except Exception as exc:
+            raise ConnectionError(f"TMDb inaccessible : {exc}")
+
+    def search_movie(self, query: str, year: str = '') -> list:
+        """Recherche film avec fallbacks: avec annee, sans annee, sans accents."""
+        def _parse(data):
+            out = []
+            for r in data.get('results', [])[:8]:
+                yr = r.get('release_date', '')[:4] or '?'
+                out.append({
+                    'id':             r['id'],
+                    'title':          r.get('title', r.get('original_title', '?')),
+                    'original_title': r.get('original_title', ''),
+                    'year':           yr,
+                    'type':           'movie',
+                })
+            return out
+        # Tentative 1 : query + annee
+        params = {'query': query}
+        if year: params['year'] = year
+        results = _parse(self._get('/search/movie', params))
+        if results: return results
+        # Tentative 2 : sans annee (annee peut etre decalee de 1 an)
+        if year:
+            results = _parse(self._get('/search/movie', {'query': query}))
+            if results: return results
+        # Tentative 3 : query simplifiee (premiers 3 mots)
+        words = query.split()
+        if len(words) > 3:
+            short_q = ' '.join(words[:4])
+            results = _parse(self._get('/search/movie', {'query': short_q}))
+            if results: return results
+        return []
+
+    def search_tv(self, query: str, year: str = '') -> list:
+        """Recherche serie avec fallbacks."""
+        def _parse(data):
+            out = []
+            for r in data.get('results', [])[:8]:
+                yr = r.get('first_air_date', '')[:4] or '?'
+                out.append({
+                    'id':             r['id'],
+                    'title':          r.get('name', r.get('original_name', '?')),
+                    'original_title': r.get('original_name', ''),
+                    'year':           yr,
+                    'type':           'tv',
+                })
+            return out
+        params = {'query': query}
+        if year: params['first_air_date_year'] = year
+        results = _parse(self._get('/search/tv', params))
+        if results: return results
+        if year:
+            results = _parse(self._get('/search/tv', {'query': query}))
+            if results: return results
+        words = query.split()
+        if len(words) > 3:
+            results = _parse(self._get('/search/tv', {'query': ' '.join(words[:4])}))
+            if results: return results
+        return []
+
+    def get_movie(self, tmdb_id: int) -> dict:
+        data = self._get(f'/movie/{tmdb_id}', {})
+        return {
+            'id':    data['id'],
+            'title': data.get('title', data.get('original_title', '?')),
+            'year':  data.get('release_date', '')[:4] or '?',
+            'type':  'movie',
+        }
+
+    def get_tv(self, tmdb_id: int) -> dict:
+        data = self._get(f'/tv/{tmdb_id}', {})
+        return {
+            'id':    data['id'],
+            'title': data.get('name', data.get('original_name', '?')),
+            'year':  data.get('first_air_date', '')[:4] or '?',
+            'type':  'tv',
+        }
+
+
+class AniListScraper:
+    """Interroge l'API AniList (GraphQL, sans cle API) pour manga et anime."""
+
+    URL = 'https://graphql.anilist.co'
+
+    def _query(self, gql: str, variables: dict) -> dict:
+        body = json.dumps({'query': gql, 'variables': variables}).encode('utf-8')
+        req  = urllib.request.Request(self.URL, data=body,
+            headers={'Content-Type': 'application/json',
+                     'User-Agent': 'FileRenamer/1.0'})
+        try:
+            resp = urllib.request.urlopen(req, timeout=8)
+            return json.loads(resp.read().decode('utf-8'))
+        except Exception as exc:
+            raise ConnectionError(f"AniList inaccessible : {exc}")
+
+    def search(self, query: str, media_type: str = 'MANGA') -> list:
+        """media_type = MANGA | ANIME"""
+        # Champs valides AniList : romaji, english, native, userPreferred
+        # "french" n'existe PAS dans le schéma → HTTP 400
+        gql = """
+        query ($search: String, $type: MediaType) {
+          Page(perPage: 8) {
+            media(search: $search, type: $type) {
+              id
+              title { romaji english native userPreferred }
+              startDate { year }
+              volumes
+              episodes
+            }
+          }
+        }"""
+        data = self._query(gql, {'search': query, 'type': media_type})
+        results = []
+        for r in data.get('data', {}).get('Page', {}).get('media', []):
+            t = r.get('title', {})
+            # Priorité : userPreferred (langue interface AniList) > english > romaji > native
+            title = t.get('userPreferred') or t.get('english') or t.get('romaji') or t.get('native') or '?'
+            yr    = (r.get('startDate') or {}).get('year') or '?'
+            results.append({
+                'id':     r['id'],
+                'title':  title,
+                'romaji': t.get('romaji', ''),
+                'year':   str(yr),
+                'type':   media_type.lower(),
+                'volumes': r.get('volumes') or '?',
+            })
+        return results
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  FileRenamer — UI 2026
@@ -456,11 +724,12 @@ def ENT(parent, var, width=24, font_size=11):
 class App(tk.Tk):
 
     MODES = [
-        ('video',  '▶', 'Films & Séries'),
-        ('manga',  '◈', 'Mangas'),
-        ('book',   '◉', 'Livres & BD'),
-        ('photo',  '◎', 'Photos'),
-        ('custom', '◆', 'Personnalisé'),
+        ('video',    '▶', 'Films & Séries'),
+        ('manga',    '◈', 'Mangas'),
+        ('book',     '◉', 'Livres & BD'),
+        ('photo',    '◎', 'Photos'),
+        ('custom',   '◆', 'Personnalisé'),
+        ('settings', '◍', 'Paramètres'),
     ]
 
     def __init__(self):
@@ -471,13 +740,22 @@ class App(tk.Tk):
         self.configure(bg=_BG)
 
         # ── Variables ─────────────────────────────────────────────
+        # Clé API TMDb
+        self.tmdb_api_key        = tk.StringVar(value='')
+        self._tmdb               = None   # TMDbScraper instance (lazy)
+        self._anilist            = AniListScraper()
+        self.scraper_enabled     = tk.BooleanVar(value=True)
+
         self.folder_var          = tk.StringVar()
         self.recursive_var       = tk.BooleanVar(value=False)
         self.rename_folder_var   = tk.BooleanVar(value=False)
-        self.video_mode          = tk.StringVar(value='film_plex')
+        self.video_mode          = tk.StringVar(value='film')
         self.video_conv          = tk.StringVar(value='plex')
         self.v_overwrite         = tk.BooleanVar(value=False)
         self.v_multi_titles      = tk.BooleanVar(value=False)
+        self.v_nfo               = tk.BooleanVar(value=False)
+        self.v_anime             = tk.BooleanVar(value=False)
+        self.v_tmdb_id           = tk.StringVar()
         self.manga_mode          = tk.StringVar(value='kobo')
         self.manga_series        = tk.StringVar()
         self.manga_year          = tk.StringVar()
@@ -501,8 +779,10 @@ class App(tk.Tk):
         self.custom_manga        = tk.BooleanVar(value=True)
         self.custom_image        = tk.BooleanVar(value=True)
         self.preview_data        = []
+        self._selected_files     = []   # fichiers choisis individuellement
         self.folder_preview_data = []
         self._pages              = {}
+        self._current_mode       = 'video'
         self._nav_btns           = {}
 
         self._build_ui()
@@ -585,6 +865,661 @@ class App(tk.Tk):
         self._build_all_pages()
         self._show_page('video')
 
+
+    # ── Scraper helpers ───────────────────────────────────────────
+
+    def _get_tmdb(self):
+        key = self.tmdb_api_key.get().strip()
+        if not key:
+            raise ValueError("Clé API TMDb manquante — configurez-la dans Paramètres.")
+        if self._tmdb is None or self._tmdb.api_key != key:
+            self._tmdb = TMDbScraper(key)
+        return self._tmdb
+
+    def _scrape_async(self, search_fn, query, year, callback):
+        """Lance la recherche dans un thread pour ne pas bloquer l'UI."""
+        def _run():
+            try:
+                results = search_fn(query, year)
+                self.after(0, lambda: callback(results, None))
+            except Exception as exc:
+                self.after(0, lambda: callback(None, str(exc)))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _scrape_dialog(self, results, mode, files, conv, anime=False):
+        """Popup de selection — menus deroulants ergonomiques."""
+        if not results:
+            messagebox.showwarning('Scraper', 'Aucun resultat trouve.')
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title('Confirmer le titre')
+        dlg.configure(bg=_BG)
+        dlg.geometry('520x320')
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        # Header
+        hdr = tk.Frame(dlg, bg=_PANEL)
+        hdr.pack(fill='x')
+        L(hdr, 'Confirmer le titre', 13, bold=True,
+          fg=_AMBER, bg=_PANEL).pack(anchor='w', padx=20, pady=(14,2))
+        L(hdr, 'Verifiez et ajustez si necessaire', 9,
+          fg=_MUTED, bg=_PANEL).pack(anchor='w', padx=20, pady=(0,12))
+        tk.Frame(dlg, bg=_AMBER, height=1).pack(fill='x')
+
+        body = tk.Frame(dlg, bg=_BG)
+        body.pack(fill='both', expand=True, padx=24, pady=16)
+
+        # ── Menu deroulant : choix du résultat ──────────────────
+        L(body, 'Résultat TMDb', 10, bold=True, fg=_TEXT2, bg=_BG).pack(anchor='w')
+        # Labels courts : "Titre (Année)"
+        choices = [f"{r['title']}  ({r['year']})" for r in results]
+        choice_var = tk.StringVar(value=choices[0])
+        opt = tk.OptionMenu(body, choice_var, *choices)
+        opt.configure(
+            font=F(11), bg=_CARD, fg=_TEXT,
+            activebackground=_CARD2, activeforeground=_AMBER,
+            highlightthickness=0, relief='flat',
+            indicatoron=True, bd=0, padx=12, pady=8,
+            anchor='w', width=38)
+        opt['menu'].configure(
+            font=F(10), bg=_CARD, fg=_TEXT,
+            activebackground=_SEL, activeforeground=_AMBER,
+            relief='flat', bd=0)
+        opt.pack(fill='x', pady=(4,14))
+
+        # ── Champ titre modifiable ───────────────────────────────
+        L(body, 'Titre (modifiable)', 10, bold=True, fg=_TEXT2, bg=_BG).pack(anchor='w')
+        title_var = tk.StringVar(value=results[0]['title'])
+        title_ent = ENT(body, title_var, width=42)
+        title_ent.pack(fill='x', pady=(4,0))
+
+        # ── Champ année modifiable ───────────────────────────────
+        yr_row = tk.Frame(body, bg=_BG)
+        yr_row.pack(fill='x', pady=(10,0))
+        L(yr_row, 'Année', 10, bold=True, fg=_TEXT2, bg=_BG).pack(side='left', padx=(0,12))
+        year_var = tk.StringVar(value=results[0]['year'])
+        ENT(yr_row, year_var, width=8).pack(side='left')
+
+        # ID TMDb (lecture seule, pour info)
+        L(yr_row, '   ID TMDb', 10, bold=True, fg=_MUTED, bg=_BG).pack(side='left', padx=(20,8))
+        id_var = tk.StringVar(value=str(results[0]['id']))
+        LM(yr_row, '', 10, fg=_CYAN, bg=_BG).pack(side='left')
+        id_lbl = tk.Label(yr_row, textvariable=id_var,
+            font=FM(10), fg=_CYAN, bg=_BG)
+        id_lbl.pack(side='left')
+
+        # Sync menu -> champs
+        def _on_choice(*_):
+            val = choice_var.get()
+            idx = choices.index(val)
+            r   = results[idx]
+            title_var.set(r['title'])
+            year_var.set(r['year'])
+            id_var.set(str(r['id']))
+        choice_var.trace_add('write', _on_choice)
+
+        # ── Boutons ──────────────────────────────────────────────
+        tk.Frame(dlg, bg=_BORDER, height=1).pack(fill='x')
+        bar = tk.Frame(dlg, bg=_BG)
+        bar.pack(fill='x', padx=20, pady=12)
+
+        chosen = {'result': None}
+
+        def _confirm():
+            # Construire le résultat avec les valeurs modifiées
+            val = choice_var.get()
+            idx = choices.index(val)
+            r   = dict(results[idx])
+            r['title'] = title_var.get().strip() or r['title']
+            r['year']  = year_var.get().strip()  or r['year']
+            chosen['result'] = r
+            dlg.destroy()
+
+        BTN(bar, '✓  Confirmer', _confirm,
+            bg=_GREEN, fg=_BG, bold=True, pad=(20,9)).pack(side='right', padx=4)
+        BTN(bar, 'Annuler', dlg.destroy,
+            bg=_PANEL, pad=(16,9)).pack(side='right', padx=8)
+
+        dlg.wait_window()
+        if not chosen['result']:
+            return
+        self._apply_scrape_result(chosen['result'], mode, files, conv, anime)
+
+    def _apply_scrape_result(self, result, mode, files, conv, anime):
+        """Applique le résultat scraper pour générer les noms finaux."""
+        title  = result['title']
+        year   = result['year']
+        tmdb_id = str(result['id'])
+        pairs  = []
+
+        if mode == 'video_film':
+            for fp in files:
+                p   = Path(fp)
+                if conv == 'tmdb':
+                    t_dots = engine.safe_filename(title).replace(' ', '.')
+                    new = f"{t_dots}.{year}{p.suffix.lower()}" if year != '?'                           else f"{t_dots}{p.suffix.lower()}"
+                elif conv == 'mediaportal':
+                    new = engine.safe_filename(f"{title}{p.suffix.lower()}")
+                else:  # plex, kodi, infuse
+                    new = engine.safe_filename(
+                        f"{title} ({year}){p.suffix.lower()}")                         if year != '?' else engine.safe_filename(
+                        f"{title}{p.suffix.lower()}")
+                pairs.append((fp, new))
+
+        elif mode == 'video_serie':
+            for fp in files:
+                p = Path(fp)
+                s, e, e2 = engine.extract_season_episode(p.stem)
+                ep_w = 3 if anime else 2
+                if s is not None and e is not None:
+                    ep_str = f"S{s:02d}E{e:0{ep_w}d}-E{e2:0{ep_w}d}"                              if e2 else f"S{s:02d}E{e:0{ep_w}d}"
+                    if conv == 'tmdb':
+                        t_dots = engine.safe_filename(title).replace(' ', '.')
+                        new = f"{t_dots}.{ep_str}{p.suffix.lower()}"
+                    elif conv == 'kodi':
+                        new = engine.safe_filename(f"{title} {ep_str}{p.suffix.lower()}")
+                    elif conv == 'mediaportal':
+                        new = engine.safe_filename(f"{title}_S{s:02d}E{e:02d}{p.suffix.lower()}")
+                    else:
+                        new = engine.safe_filename(f"{title} - {ep_str}{p.suffix.lower()}")
+                else:
+                    new = engine.safe_filename(title + p.suffix.lower())
+                pairs.append((fp, new))
+
+        elif mode == 'manga':
+            for fp in files:
+                p   = Path(fp)
+                vol = engine.extract_volume(p.stem)
+                ser = engine.safe_filename(title)
+                yr  = year if year != '?' else ''
+                if conv == 'kobo':
+                    new = f"{ser} - T{vol:03d}{p.suffix.lower()}"                           if vol is not None else ser + p.suffix.lower()
+                elif conv == 'pc':
+                    new = f"{ser} v{vol:03d}{p.suffix.lower()}"                           if vol is not None else ser + p.suffix.lower()
+                else:  # mylar
+                    new = f"{ser} ({yr}) #{vol:03d}{p.suffix.lower()}"                           if vol is not None else ser + p.suffix.lower()
+                pairs.append((fp, new))
+
+        elif mode == 'book':
+            au = result.get('author', '')
+            for fp in files:
+                new = engine.rename_book(os.path.basename(fp),
+                    au or self.book_author.get(), conv)
+                pairs.append((fp, new))
+
+        # Mettre à jour preview
+        self.preview_data = pairs
+        self.tree.delete(*self.tree.get_children())
+        count_ok = 0
+        for fp, new_name in pairs:
+            old_name = os.path.basename(fp)
+            same   = (old_name == new_name)
+            dest   = os.path.join(os.path.dirname(fp), new_name)
+            exists = os.path.exists(dest) and not same
+            if same:     tag, st = 'same', '—'
+            elif exists: tag, st = 'exists', '⚠ existe'
+            else:        tag, st = 'ok', '✓ prêt'; count_ok += 1
+            self.tree.insert('', 'end',
+                values=('  '+old_name, '  '+new_name, st), tags=(tag,))
+
+        # NFO avec ID TMDb confirme
+        if self.v_nfo.get() and result.get('type') in ('movie', 'tv', 'tv_anime'):
+            folder   = self.folder_var.get().strip()
+            nfo_type = 'movie' if result['type'] == 'movie' else 'tvshow'
+            try:
+                engine.generate_nfo(folder, nfo_type, title, tmdb_id)
+                self.status_var.set(
+                    f'TMDb confirme : {title} ({year}) — ID {tmdb_id} — '
+                    f'{count_ok} fichier(s) pret(s)')
+            except Exception:
+                pass
+        else:
+            self.status_var.set(
+                f'TMDb : {title} ({year}) — {count_ok} fichier(s) pret(s)')
+
+        self.count_label.config(
+            text=f'{len(pairs)} fichier(s)  ·  {count_ok} a renommer')
+        self.tree.selection_set(self.tree.get_children())
+        self.apply_btn.configure(state='normal' if count_ok > 0 else 'disabled')
+
+    def _run_scraper(self, mode):
+        """Point d'entrée bouton 'Scraper TMDb/AniList'."""
+        if not self.scraper_enabled.get():
+            self._run_preview(mode)
+            return
+
+        folder = self.folder_var.get().strip()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showwarning('Dossier', 'Choisissez un dossier valide.')
+            return
+
+        # Déterminer la query depuis le nom du dossier ou du premier fichier
+        folder_name = os.path.basename(folder)
+        query = engine.clean_title(folder_name) or folder_name
+        year  = engine.extract_year(folder_name)
+        conv  = self.video_conv.get()
+        anime = self.v_anime.get()
+
+        self.status_var.set(f'Recherche TMDb : "{query}"...')
+        self.update_idletasks()
+
+        if mode in ('video_film', 'video_serie'):
+            # Collecter les fichiers
+            vm      = self.video_mode.get()
+            is_film = (vm == 'film_plex')
+            files   = self._collect(VIDEO_EXTS)
+            if not files:
+                return
+            # Si un seul fichier, utiliser son nom pour la query
+            if len(files) == 1:
+                query = engine.clean_title(os.path.basename(files[0]))
+                year  = engine.extract_year(os.path.basename(files[0]))
+
+            tmdb = self._get_tmdb()
+            search_fn = tmdb.search_movie if is_film else tmdb.search_tv
+            v_mode    = 'video_film' if is_film else 'video_serie'
+
+            def _cb(results, err):
+                if err:
+                    messagebox.showerror('TMDb', err)
+                    self.status_var.set('Erreur TMDb')
+                    return
+                self._scrape_dialog(results, v_mode, files, conv, anime)
+
+            self._scrape_async(search_fn, query, year, _cb)
+
+        elif mode == 'manga':
+            exts = set()
+            if self.manga_cbz.get():  exts.add('.cbz')
+            if self.manga_cbr.get():  exts.add('.cbr')
+            if self.manga_pdf.get():  exts.add('.pdf')
+            if self.manga_epub.get(): exts.add('.epub')
+            files = self._collect(exts)
+            if not files:
+                return
+            s_query = self.manga_series.get().strip() or query
+
+            def _cb_manga(results, err):
+                if err:
+                    messagebox.showerror('AniList', err)
+                    self.status_var.set('Erreur AniList')
+                    return
+                self._scrape_dialog(results, 'manga', files,
+                    self.manga_mode.get())
+
+            self._scrape_async(
+                self._anilist.search, s_query, '', _cb_manga)
+            # AniList.search prend (query, media_type) — adapter le callback
+            # On réappelle correctement :
+            def _run_al():
+                try:
+                    results = self._anilist.search(s_query, 'MANGA')
+                    self.after(0, lambda: _cb_manga(results, None))
+                except Exception as exc:
+                    self.after(0, lambda: _cb_manga(None, str(exc)))
+            # Annuler le premier thread et relancer correctement
+            threading.Thread(target=_run_al, daemon=True).start()
+
+
+    # ── Bannière suggestion ───────────────────────────────────────
+
+    def _show_tmdb_banner(self, results, mode, files, conv, anime=False):
+        """Bannière intelligente : menu deroulant + Accepter / Modifier."""
+        ban = self._tmdb_banner
+        for w in ban.winfo_children():
+            w.destroy()
+        if not results:
+            ban.pack_forget()
+            return
+
+        choices    = [f"{r['title']}  ({r['year']})" for r in results]
+        choice_var = tk.StringVar(value=choices[0])
+
+        src_label = {
+            'video_film':  '🎬 TMDb Films',
+            'video_serie': '📺 TMDb Séries',
+            'manga':       '📚 AniList',
+            'book':        '📖 Open Library',
+        }.get(mode, '🔍 TMDb')
+        # Détecter si résultats viennent d'AniList (ont 'romaji' key)
+        if results and results[0].get('romaji') is not None and 'video' in mode:
+            src_label = '🎌 AniList Anime'
+
+        row = tk.Frame(ban, bg='#0a2540')
+        row.pack(fill='x', padx=14, pady=(8,4))
+
+        tk.Label(row, text=src_label, bg='#0a2540',
+            fg=_CYAN, font=F(10, True)).pack(side='left', padx=(0,10))
+
+        opt = tk.OptionMenu(row, choice_var, *choices)
+        opt.configure(
+            font=F(11, True), bg='#0d3060', fg=_TEXT,
+            activebackground='#1a4a7a', activeforeground=_AMBER,
+            highlightthickness=0, relief='flat', bd=0,
+            padx=10, pady=4, anchor='w', indicatoron=True)
+        opt['menu'].configure(
+            font=F(10), bg='#0d3060', fg=_TEXT,
+            activebackground='#1e3a5f', activeforeground=_AMBER,
+            relief='flat', bd=0)
+        opt.pack(side='left', padx=(0,14), fill='x', expand=True)
+
+        def _accept():
+            idx = choices.index(choice_var.get())
+            self._apply_scrape_result(results[idx], mode, files, conv, anime)
+            ban.pack_forget()
+
+        def _edit():
+            idx = choices.index(choice_var.get())
+            self._scrape_edit_popup(results[idx], mode, files, conv, anime)
+
+        BTN(row, '✓ Accepter', _accept,
+            bg=_GREEN, fg=_BG, bold=True, pad=(12,5)).pack(side='left', padx=(0,6))
+        BTN(row, '✎', _edit,
+            bg='#1a4a7a', fg=_TEXT, pad=(8,5)).pack(side='left', padx=(0,6))
+        BTN(row, '✕', ban.pack_forget,
+            bg='#0a2540', fg=_MUTED, pad=(6,5)).pack(side='right')
+
+        info = tk.Frame(ban, bg='#071a30')
+        info.pack(fill='x', padx=14, pady=(0,6))
+        info_lbl = tk.Label(info, text='', bg='#071a30',
+            fg=_MUTED, font=FM(9), anchor='w')
+        info_lbl.pack(anchor='w', pady=2)
+
+        def _upd(*_):
+            idx  = choices.index(choice_var.get())
+            r    = results[idx]
+            orig = r.get('original_title') or r.get('romaji') or r.get('author') or ''
+            txt  = f"ID : {r['id']}"
+            if orig and orig != r['title']:
+                txt += f"   ·   {orig}"
+            info_lbl.configure(text=txt)
+        choice_var.trace_add('write', _upd)
+        _upd()
+
+        ban.pack(fill='x', before=self._tree_frame)
+
+    def _scrape_edit_popup(self, result, mode, files, conv, anime):
+        """Mini popup pour corriger titre / annee avant d'appliquer."""
+        dlg = tk.Toplevel(self)
+        dlg.title('Modifier')
+        dlg.configure(bg=_BG)
+        dlg.geometry('460x200')
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        hdr = tk.Frame(dlg, bg=_PANEL)
+        hdr.pack(fill='x')
+        L(hdr, 'Corriger le titre', 12, bold=True, fg=_AMBER, bg=_PANEL).pack(
+            anchor='w', padx=16, pady=10)
+        tk.Frame(dlg, bg=_AMBER, height=1).pack(fill='x')
+
+        body = tk.Frame(dlg, bg=_BG)
+        body.pack(fill='x', padx=20, pady=16)
+
+        title_var = tk.StringVar(value=result['title'])
+        year_var  = tk.StringVar(value=result['year'])
+
+        r1 = tk.Frame(body, bg=_BG)
+        r1.pack(fill='x', pady=(0,8))
+        L(r1, 'Titre :', 10, bold=True, fg=_TEXT2, bg=_BG).pack(side='left', padx=(0,8))
+        ENT(r1, title_var, width=34).pack(side='left', fill='x', expand=True)
+
+        r2 = tk.Frame(body, bg=_BG)
+        r2.pack(fill='x')
+        L(r2, 'Annee :', 10, bold=True, fg=_TEXT2, bg=_BG).pack(side='left', padx=(0,8))
+        ENT(r2, year_var, width=8).pack(side='left')
+        L(r2, f"ID : {result['id']}", 9, fg=_MUTED, bg=_BG).pack(side='left', padx=16)
+
+        tk.Frame(dlg, bg=_BORDER, height=1).pack(fill='x')
+        bar = tk.Frame(dlg, bg=_BG)
+        bar.pack(fill='x', padx=16, pady=10)
+
+        def _ok():
+            r = dict(result)
+            r['title'] = title_var.get().strip() or r['title']
+            r['year']  = year_var.get().strip()  or r['year']
+            dlg.destroy()
+            self._apply_scrape_result(r, mode, files, conv, anime)
+            self._tmdb_banner.pack_forget()
+
+        BTN(bar, '✓ Valider', _ok, bg=_GREEN, fg=_BG, bold=True, pad=(16,8)).pack(
+            side='right', padx=4)
+        BTN(bar, 'Annuler', dlg.destroy, bg=_PANEL, pad=(12,8)).pack(
+            side='right', padx=8)
+        dlg.wait_window()
+
+    # ── Scraping automatique unifié ───────────────────────────────
+
+    def _get_files_for_mode(self, mode_id, folder_path=None):
+        """Retourne les fichiers filtrés selon le mode actif."""
+        if mode_id == 'video':
+            exts = VIDEO_EXTS
+        elif mode_id == 'manga':
+            exts = set()
+            if self.manga_cbz.get():  exts.add('.cbz')
+            if self.manga_cbr.get():  exts.add('.cbr')
+            if self.manga_pdf.get():  exts.add('.pdf')
+            if self.manga_epub.get(): exts.add('.epub')
+            if not exts: exts = {'.cbz', '.cbr', '.pdf', '.epub'}
+        elif mode_id == 'book':
+            exts = set()
+            if self.book_pdf.get():  exts.add('.pdf')
+            if self.book_epub.get(): exts.add('.epub')
+            if self.book_mobi.get(): exts.add('.mobi')
+            if self.book_djvu.get(): exts.add('.djvu')
+            if not exts: exts = {'.epub', '.pdf', '.mobi'}
+        elif mode_id == 'photo':
+            exts = IMAGE_EXTS
+        else:
+            return []
+        # Priorité : fichiers sélectionnés individuellement
+        if self._selected_files:
+            valid = [f for f in self._selected_files
+                     if os.path.isfile(f) and Path(f).suffix.lower() in exts]
+            if valid:
+                return valid
+        # Sinon scanner le dossier
+        if folder_path:
+            return self._collect_silent(exts, folder_path)
+        return []
+
+
+    def _do_scrape(self, mode_id, files):
+        """Scraping unifie pour toutes les categories."""
+        if not files:
+            self.status_var.set('Scraper : aucun fichier trouvé')
+            return
+        # Query depuis le 1er fichier, fallback nom dossier
+        first       = os.path.basename(files[0])
+        query, year = engine.build_query(first)
+        folder = self.folder_var.get().strip()
+        if (not query or len(query) < 3) and folder:
+            q2, y2 = engine.build_query(os.path.basename(folder))
+            if q2: query = q2
+            if y2 and not year: year = y2
+        # Dernier recours : stem du fichier brut
+        if not query or len(query) < 3:
+            query = re.sub(r'[._\-]+', ' ', Path(first).stem).strip()
+        if not query or len(query) < 3:
+            self.status_var.set(f'Scraper : query trop courte depuis "{first}"')
+            return
+
+        if mode_id == 'video':
+            conv     = self.video_conv.get()
+            vmode    = self.video_mode.get()   # 'film' | 'serie' | 'anime'
+            is_film  = (vmode == 'film')
+            is_anime = (vmode == 'anime')
+            v_mode   = 'video_film' if is_film else 'video_serie'
+            try:
+                tmdb = self._get_tmdb()
+            except ValueError:
+                return
+            # Anime : cherche d'abord sur TMDb TV, fallback AniList
+            if is_anime:
+                search_fn = tmdb.search_tv
+            elif is_film:
+                search_fn = tmdb.search_movie
+            else:
+                search_fn = tmdb.search_tv
+            self.status_var.set(f'TMDb : "{query}"...')
+            self.update_idletasks()
+            def _run_v(q=query, y=year, f=files, vm=v_mode, c=conv,
+                       ia=is_anime, sf=search_fn):
+                try:
+                    res = sf(q, y)
+                    # Anime : si TMDb vide, essayer AniList
+                    if not res and ia:
+                        try:
+                            res = self._anilist.search(q, 'ANIME')
+                            if res:
+                                self.after(0, lambda r=res, fi=f, mo=vm, co=c:
+                                    self._show_tmdb_banner(r, mo, fi, co, True))
+                                return
+                        except Exception:
+                            pass
+                    if res:
+                        self.after(0, lambda r=res, fi=f, mo=vm, co=c, a=ia:
+                            self._show_tmdb_banner(r, mo, fi, co, a))
+                    else:
+                        self.after(0, lambda: self.status_var.set(
+                            f'Aucun résultat pour "{q}"'))
+                except Exception as exc:
+                    err = str(exc)
+                    self.after(0, lambda e=err: (
+                        self.status_var.set(f'TMDb erreur : {e}'),
+                        messagebox.showerror('Erreur TMDb', e)
+                    ))
+            threading.Thread(target=_run_v, daemon=True).start()
+
+        elif mode_id == 'manga':
+            s_query = self.manga_series.get().strip() or query
+            conv    = self.manga_mode.get()
+            self.status_var.set(f'AniList : "{s_query}"...')
+            self.update_idletasks()
+            def _run_m(q=s_query, f=files, c=conv):
+                try:
+                    res = self._anilist.search(q, 'MANGA')
+                    if res:
+                        self.after(0, lambda r=res, fi=f, co=c:
+                            self._show_tmdb_banner(r, 'manga', fi, co))
+                    else:
+                        self.after(0, lambda: self.status_var.set(
+                            f'Aucun résultat AniList pour "{q}"'))
+                except Exception as exc:
+                    err = str(exc)
+                    self.after(0, lambda e=err: self.status_var.set(f'AniList erreur : {e}'))
+            threading.Thread(target=_run_m, daemon=True).start()
+
+        elif mode_id == 'book':
+            # files est déjà filtré par _get_files_for_mode
+            conv = self.book_conv.get()
+            au   = self.book_author.get().strip()
+            # Détecter format "Auteur - Titre" dans la query ou le stem
+            stem = Path(first).stem
+            stem_parts = re.split(r' - ', stem, maxsplit=1)
+            if len(stem_parts) == 2 and len(stem_parts[0].strip()) < 40:
+                # "Tolkien - Le Seigneur" → titre = partie droite, auteur = partie gauche
+                if not au:
+                    au = stem_parts[0].strip()
+                # Recalculer query depuis le titre seul (partie droite)
+                q2, _ = engine.build_query(stem_parts[1].strip())
+                if q2 and len(q2) >= 3:
+                    query = q2
+            oq = f"{query} {au}".strip() if au else query
+            self.status_var.set(f'Open Library : "{query}"...')
+            self.update_idletasks()
+            def _run_b(q=oq, tq=query, f=files, c=conv):
+                try:
+                    res = self._search_openlibrary(q)
+                    if not res and q != tq:
+                        res = self._search_openlibrary(tq)
+                    if res:
+                        self.after(0, lambda r=res, fi=f, co=c:
+                            self._show_tmdb_banner(r, 'book', fi, co))
+                    else:
+                        self.after(0, lambda: self.status_var.set(
+                            f'Aucun résultat Open Library pour "{tq}"'))
+                except Exception as exc:
+                    err = str(exc)
+                    self.after(0, lambda e=err: self.status_var.set(f'OpenLib erreur : {e}'))
+            threading.Thread(target=_run_b, daemon=True).start()
+
+    def _search_openlibrary(self, query: str) -> list:
+        """Recherche Open Library (gratuit, sans cle)."""
+        qs  = urllib.parse.urlencode({
+            'q': query, 'limit': 8,
+            'fields': 'key,title,author_name,first_publish_year'})
+        url = f"https://openlibrary.org/search.json?{qs}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'FileRenamer/1.0'})
+        resp = urllib.request.urlopen(req, timeout=8)
+        data = json.loads(resp.read().decode('utf-8'))
+        results = []
+        for r in data.get('docs', [])[:8]:
+            au = (r.get('author_name') or ['?'])[0]
+            yr = str(r.get('first_publish_year') or '?')
+            results.append({
+                'id':    r.get('key', '').replace('/works/', ''),
+                'title': r.get('title', '?'),
+                'year':  yr,
+                'author': au,
+                'original_title': au,
+                'type':  'book',
+            })
+        return results
+
+    def _trigger_scrape(self, folder_path, delay=200):
+        """Déclenche un scrape dossier avec annulation du précédent pending."""
+        if hasattr(self, '_scrape_pending_id') and self._scrape_pending_id:
+            try: self.after_cancel(self._scrape_pending_id)
+            except: pass
+        fp = folder_path  # capture locale
+        self._scrape_pending_id = self.after(
+            delay, lambda: self._auto_scrape(fp))
+
+    def _trigger_scrape_files(self, files, delay=200):
+        """Déclenche un scrape fichiers avec annulation du précédent pending."""
+        if hasattr(self, '_scrape_pending_id') and self._scrape_pending_id:
+            try: self.after_cancel(self._scrape_pending_id)
+            except: pass
+        fl = list(files)  # capture locale
+        self._scrape_pending_id = self.after(
+            delay, lambda: self._auto_scrape_from_files(fl))
+
+    def _auto_scrape(self, folder_path):
+        """Declenche quand un dossier est selectionne."""
+        if not self.scraper_enabled.get():
+            return
+        mode_id = self._current_mode
+        if mode_id not in ('video', 'manga', 'book'):
+            return
+        files = self._get_files_for_mode(mode_id, folder_path)
+        self._do_scrape(mode_id, files)
+
+    def _auto_scrape_from_files(self, files):
+        """Declenche quand des fichiers sont selectionnes individuellement."""
+        if not self.scraper_enabled.get():
+            return
+        mode_id = self._current_mode
+        if mode_id not in ('video', 'manga', 'book'):
+            return
+        self._do_scrape(mode_id, files)
+
+    def _collect_silent(self, exts, folder_path):
+        """Collecte fichiers sans popup."""
+        if not folder_path or not os.path.isdir(folder_path):
+            return []
+        files = []
+        try:
+            for fn in os.listdir(folder_path):
+                fp = os.path.join(folder_path, fn)
+                if os.path.isfile(fp) and Path(fn).suffix.lower() in exts:
+                    files.append(fp)
+        except Exception:
+            pass
+        return sorted(files)
+
     # ── Header ────────────────────────────────────────────────────
 
     def _build_header(self):
@@ -616,8 +1551,10 @@ class App(tk.Tk):
             font=FM(10), bg=_BORDER, fg=_TEXT,
             insertbackground=_AMBER, relief='flat', bd=0).pack(
             side='left', fill='x', expand=True, pady=6)
-        BTN(row, '…', self._browse_folder, bg=_AMBER, fg=_BG, bold=True,
-            pad=(10,6)).pack(side='left', padx=(4,4), pady=4)
+        BTN(row, '📁 Dossier', self._browse_folder, bg=_AMBER, fg=_BG, bold=True,
+            pad=(10,6)).pack(side='left', padx=(4,2), pady=4)
+        BTN(row, '🎬 Fichiers', self._browse_files, bg=_CARD2, fg=_AMBER, bold=True,
+            pad=(10,6)).pack(side='left', padx=(2,4), pady=4)
 
         # Options
         opts = tk.Frame(folder_frame, bg=_SURF)
@@ -626,6 +1563,13 @@ class App(tk.Tk):
             side='left', padx=(0,16))
         CHK(opts, 'Renommer le dossier', self.rename_folder_var, fg=_TEAL).pack(
             side='left')
+
+        # Auto-scrape quand le dossier change (saisie manuelle)
+        def _on_folder_change(*_):
+            d = self.folder_var.get().strip()
+            if d and os.path.isdir(d):
+                self._trigger_scrape(d, delay=700)
+        self.folder_var.trace_add('write', _on_folder_change)
 
         # Droits admin
         if sys.platform == 'win32':
@@ -691,6 +1635,14 @@ class App(tk.Tk):
 
     def _show_page(self, mode_id):
         self._pages['_current'] = mode_id
+        self._current_mode = mode_id  # mise à jour immédiate
+        # Déclencher scraping si dossier ou fichiers déjà chargés
+        if mode_id in ('video', 'manga', 'book'):
+            d = self.folder_var.get().strip()
+            if self._selected_files:
+                self._trigger_scrape_files(list(self._selected_files), delay=300)
+            elif d and os.path.isdir(d):
+                self._trigger_scrape(d, delay=300)
         for pid, page in self._pages.items():
             if pid == '_current': continue
             page.place_forget()
@@ -793,8 +1745,8 @@ class App(tk.Tk):
 
     def _run_btn(self, p, mode_id, label):
         f = tk.Frame(p, bg=_PANEL)
-        f.pack(fill='x', padx=16, side='bottom', pady=(0,16))
-        SEP(f, _BORDER).pack(fill='x', pady=(0,10))
+        f.pack(fill='x', padx=16, pady=(12, 16))
+        SEP(f, _BORDER).pack(fill='x', pady=(0, 10))
         BTN(f, f'  Analyser — {label}  →',
             lambda: self._run_preview(mode_id),
             bg=_AMBER, fg=_BG, size=11, bold=True, pad=(0, 10)
@@ -804,16 +1756,62 @@ class App(tk.Tk):
 
     def _build_all_pages(self):
         for mode_id, _, _ in self.MODES:
-            page = tk.Frame(self._page_area, bg=_PANEL)
-            self._pages[mode_id] = page
-            getattr(self, f'_page_{mode_id}')(page)
+            # Conteneur avec canvas scrollable
+            outer = tk.Frame(self._page_area, bg=_PANEL)
+            self._pages[mode_id] = outer
+
+            canvas = tk.Canvas(outer, bg=_PANEL, highlightthickness=0,
+                               bd=0)
+            sb = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
+            canvas.configure(yscrollcommand=sb.set)
+            sb.pack(side='right', fill='y')
+            canvas.pack(side='left', fill='both', expand=True)
+
+            inner = tk.Frame(canvas, bg=_PANEL)
+            win_id = canvas.create_window((0, 0), window=inner, anchor='nw')
+
+            # Ajuster largeur du frame inner à celle du canvas
+            def _on_canvas_resize(e, c=canvas, w=win_id):
+                c.itemconfig(w, width=e.width)
+            canvas.bind('<Configure>', _on_canvas_resize)
+
+            # Mettre à jour scrollregion quand le contenu change
+            def _on_frame_resize(e, c=canvas):
+                c.configure(scrollregion=c.bbox('all'))
+            inner.bind('<Configure>', _on_frame_resize)
+
+            # Molette souris
+            def _on_wheel(e, c=canvas):
+                c.yview_scroll(int(-1 * (e.delta / 120)), 'units')
+            canvas.bind('<Enter>',
+                lambda e, c=canvas: c.bind_all('<MouseWheel>',
+                    lambda ev, cc=c: cc.yview_scroll(int(-1*(ev.delta/120)),'units')))
+            canvas.bind('<Leave>',
+                lambda e, c=canvas: c.unbind_all('<MouseWheel>'))
+
+            getattr(self, f'_page_{mode_id}')(inner)
 
     def _page_video(self, p):
         self._sec(p, 'TYPE DE CONTENU')
-        self._radio(p, 'Film', 'ex: The Dark Knight (2008).mkv',
-            self.video_mode, 'film_plex', _AMBER)
-        self._radio(p, 'Série TV', 'ex: Breaking Bad - S03E07.mkv',
-            self.video_mode, 'serie_plex', _CYAN)
+        self._radio(p, 'Film',
+            'ex: Inception (2010).mkv',
+            self.video_mode, 'film', _AMBER)
+        self._radio(p, 'Série TV',
+            'ex: Breaking Bad - S03E07.mkv',
+            self.video_mode, 'serie', _CYAN)
+        self._radio(p, 'Série Animée  (Anime)',
+            'ex: Demon Slayer - S01E007.mkv  — recherche via TMDb + AniList',
+            self.video_mode, 'anime', _PINK)
+
+        # Re-scraper quand on change de type
+        def _on_mode_change(*_):
+            self._tmdb_banner.pack_forget()
+            d = self.folder_var.get().strip()
+            if self._selected_files:
+                self._trigger_scrape_files(list(self._selected_files), delay=200)
+            elif d and os.path.isdir(d):
+                self._trigger_scrape(d, delay=200)
+        self.video_mode.trace_add('write', _on_mode_change)
 
         self._sec(p, 'CONVENTION MÉDIA', _CYAN)
         self._radio(p, 'Plex · Emby · Jellyfin',
@@ -828,14 +1826,25 @@ class App(tk.Tk):
         self._radio(p, 'MediaPortal',
             'Titre.mkv  /  Titre_S01E02.mkv',
             self.video_conv, 'mediaportal', _VIOLET)
+        self._radio(p, 'Kodi / LibreELEC  (TMDb)',
+            'Titre.2008.mkv  /  Titre.S01E02.mkv',
+            self.video_conv, 'tmdb', _TEAL)
 
         self._sec(p, 'OPTIONS')
         f = tk.Frame(p, bg=_PANEL)
         f.pack(fill='x', padx=16, pady=4)
         CHK(f, 'Mode multi-titres (saisir chaque titre manuellement)',
             self.v_multi_titles, fg=_AMBER).pack(anchor='w', pady=4)
-        CHK(f, 'Écraser si la destination existe déjà',
+        CHK(f, 'Ecraser si la destination existe deja',
             self.v_overwrite, fg=_ORANGE).pack(anchor='w', pady=2)
+
+        self._sec(p, 'FICHIER .NFO  (Kodi/TMDb)', _TEAL)
+        nfo_f = tk.Frame(p, bg=_PANEL)
+        nfo_f.pack(fill='x', padx=16, pady=4)
+        CHK(nfo_f, 'Generer tvshow.nfo / movie.nfo dans le dossier',
+            self.v_nfo, fg=_TEAL).pack(anchor='w', pady=4)
+        self._hint(p, 'Le .nfo force Kodi a utiliser le bon ID TMDb', color=_MUTED)
+        self._field(p, 'ID TMDb :', self.v_tmdb_id, hint='ex: 1396')
         self._run_btn(p, 'video', 'Films & Séries')
 
     def _page_manga(self, p):
@@ -883,6 +1892,12 @@ class App(tk.Tk):
             ('PDF', self.manga_pdf, _ORANGE),
             ('EPUB', self.manga_epub, _CYAN),
         ])
+        def _on_manga_conv(*_):
+            d = self.folder_var.get().strip()
+            if d and os.path.isdir(d):
+                self._tmdb_banner.pack_forget()
+                self.after(300, lambda: self._auto_scrape(d))
+        self.manga_mode.trace_add('write', _on_manga_conv)
         self._run_btn(p, 'manga', 'Mangas')
 
     def _page_book(self, p):
@@ -901,7 +1916,7 @@ class App(tk.Tk):
             self.book_conv, 'adobe', _TEAL)
 
         self._sec(p, 'INFORMATIONS', _TEAL)
-        self._hint(p, 'Laissez vide → auteur extrait du nom de fichier')
+        self._hint(p, 'Auteur optionnel — extrait automatiquement du nom si vide')
         self._field(p, 'Auteur :', self.book_author, hint='optionnel')
 
         self._sec(p, 'FORMATS', _TEAL)
@@ -911,6 +1926,13 @@ class App(tk.Tk):
             ('MOBI', self.book_mobi, _GREEN),
             ('DJVU', self.book_djvu, _MUTED),
         ])
+        # Re-scraper si on change la convention
+        def _on_book_conv(*_):
+            d = self.folder_var.get().strip()
+            if d and os.path.isdir(d):
+                self._tmdb_banner.pack_forget()
+                self.after(300, lambda: self._auto_scrape(d))
+        self.book_conv.trace_add('write', _on_book_conv)
         self._run_btn(p, 'book', 'Livres & BD')
 
     def _page_photo(self, p):
@@ -947,6 +1969,65 @@ class App(tk.Tk):
         ])
         self._run_btn(p, 'custom', 'Personnalisé')
 
+
+    def _page_settings(self, p):
+        self._sec(p, 'API TMDB', _CYAN)
+        self._hint(p,
+            'Votre cle API TMDb v3 — gratuite sur themoviedb.org/settings/api',
+            color=_MUTED)
+        self._field(p, 'Cle API :', self.tmdb_api_key)
+
+        # Bouton tester la connexion
+        test_f = tk.Frame(p, bg=_PANEL)
+        test_f.pack(fill='x', padx=16, pady=4)
+        self._api_status = L(test_f, '', 10, fg=_MUTED, bg=_PANEL)
+        self._api_status.pack(anchor='w', pady=(0,6))
+
+        def _test_api():
+            self._api_status.configure(text='Test en cours...', fg=_MUTED)
+            self.update_idletasks()
+            def _run():
+                try:
+                    tmdb = self._get_tmdb()
+                    results = tmdb.search_movie('Inception', '2010')
+                    if results:
+                        self.after(0, lambda: self._api_status.configure(
+                            text=f'OK  Connexion TMDb reussie — {results[0]["title"]} ({results[0]["year"]})',
+                            fg=_GREEN))
+                    else:
+                        self.after(0, lambda: self._api_status.configure(
+                            text='Connexion OK mais aucun resultat', fg=_ORANGE))
+                except Exception as exc:
+                    self.after(0, lambda: self._api_status.configure(
+                        text=f'Erreur : {exc}', fg=_RED))
+            threading.Thread(target=_run, daemon=True).start()
+
+        BTN(test_f, '  Tester la connexion TMDb', _test_api,
+            bg=_CYAN, fg=_BG, bold=True).pack(anchor='w')
+
+        self._sec(p, 'SCRAPER', _CYAN)
+        f = tk.Frame(p, bg=_PANEL)
+        f.pack(fill='x', padx=16, pady=4)
+        CHK(f, 'Activer le scraper TMDb/AniList (necessite internet)',
+            self.scraper_enabled, fg=_CYAN).pack(anchor='w', pady=4)
+        self._hint(p,
+            'Desactive : utilise uniquement le nom de fichier local.',
+            color=_MUTED)
+
+        self._sec(p, 'INFORMATIONS', _MUTED)
+        infos = [
+            ('TMDb API', 'themoviedb.org/settings/api — gratuit'),
+            ('AniList',  'graphql.anilist.co — sans cle, gratuit'),
+            ('Scraper',  'Films · Series · Anime via TMDb'),
+            ('Manga',    'Titres via AniList GraphQL'),
+        ]
+        for k, v in infos:
+            row = tk.Frame(p, bg=_CARD)
+            row.pack(fill='x', padx=16, pady=2)
+            L(row, k, 10, bold=True, fg=_TEXT2, bg=_CARD).pack(
+                side='left', padx=(10,6), pady=6)
+            L(row, v, 10, fg=_MUTED, bg=_CARD).pack(side='left')
+
     # ── Panneau droit ─────────────────────────────────────────────
 
     def _build_right(self, parent):
@@ -961,8 +2042,13 @@ class App(tk.Tk):
         self.count_label.pack(side='right', padx=16)
         tk.Frame(parent, bg=_AMBER, height=1).pack(fill='x')
 
+        # ── Bannière TMDb (masquée par défaut, pack entre header et tree) ─
+        self._tmdb_banner = tk.Frame(parent, bg='#0a2540')
+        # Ne pas packer ici — sera packée via _show_tmdb_banner avant tf
+
         # Treeview
         tf = tk.Frame(parent, bg=_SURF)
+        self._tree_frame = tf   # référence pour insertion de la bannière
         tf.pack(fill='both', expand=True)
 
         cols = ('avant', 'apres', 'statut')
@@ -1019,7 +2105,32 @@ class App(tk.Tk):
 
     def _browse_folder(self):
         d = filedialog.askdirectory(title='Choisir un dossier')
-        if d: self.folder_var.set(d)
+        if d:
+            self._selected_files = []
+            self.folder_var.set(d)   # déclenche trace -> _on_folder_change
+            self._trigger_scrape(d)
+
+    def _browse_files(self):
+        files = filedialog.askopenfilenames(
+            title='Choisir des fichiers',
+            filetypes=[
+                ('Tous les medias',
+                 '*.mkv *.mp4 *.avi *.mov *.wmv *.m4v *.ts '
+                 '*.cbz *.cbr *.epub *.pdf *.mobi '
+                 '*.jpg *.jpeg *.png *.gif *.webp'),
+                ('Videos',  '*.mkv *.mp4 *.avi *.mov *.wmv *.m4v *.ts *.webm'),
+                ('Mangas',  '*.cbz *.cbr *.pdf *.epub'),
+                ('Livres',  '*.epub *.pdf *.mobi *.djvu'),
+                ('Images',  '*.jpg *.jpeg *.png *.gif *.webp *.tiff'),
+                ('Tous',    '*.*'),
+            ])
+        if not files:
+            return
+        folder = os.path.dirname(files[0])
+        self.folder_var.set(folder)
+        self._selected_files = list(files)
+        self.status_var.set(f'{len(files)} fichier(s) selectionne(s)')
+        self._trigger_scrape_files(list(files))
 
     def _toggle_select(self):
         if self.sel_all_var.get(): self.tree.selection_set(self.tree.get_children())
@@ -1034,9 +2145,13 @@ class App(tk.Tk):
         self.status_var.set('Prêt.')
 
     def _collect(self, exts):
+        # Priorité aux fichiers sélectionnés individuellement
+        if self._selected_files:
+            return [f for f in self._selected_files
+                    if Path(f).suffix.lower() in exts]
         folder = self.folder_var.get().strip()
         if not folder or not os.path.isdir(folder):
-            messagebox.showwarning('Dossier invalide', 'Sélectionnez un dossier valide.')
+            messagebox.showwarning('Dossier invalide', 'Selectionnez un dossier ou des fichiers.')
             return []
         files = []
         if self.recursive_var.get():
@@ -1058,17 +2173,31 @@ class App(tk.Tk):
         pairs = []
 
         if mode == 'video':
-            files = self._collect(VIDEO_EXTS)
-            vm, conv = self.video_mode.get(), self.video_conv.get()
-            is_film = (vm == 'film_plex')
+            files    = self._collect(VIDEO_EXTS)
+            vm       = self.video_mode.get()
+            conv     = self.video_conv.get()
+            is_film  = (vm == 'film')
+            is_anime = (vm == 'anime')
             if self.v_multi_titles.get() and is_film and files:
                 pairs = self._multi_title_dialog(files, conv)
             else:
                 for fp in files:
                     fn  = os.path.basename(fp)
                     new = engine.rename_movie(fn, conv) if is_film \
-                          else engine.rename_series(fn, conv)
+                          else engine.rename_series(fn, conv, anime=is_anime)
                     pairs.append((fp, new))
+            # Generer .nfo si demande
+            if self.v_nfo.get() and files:
+                folder    = self.folder_var.get().strip()
+                nfo_type  = 'movie' if is_film else 'tvshow'
+                first_fn  = os.path.basename(files[0])
+                nfo_title = engine.clean_title(first_fn)
+                tmdb_id   = self.v_tmdb_id.get().strip()
+                try:
+                    nfo_path = engine.generate_nfo(folder, nfo_type, nfo_title, tmdb_id)
+                    self.status_var.set(f'NFO genere : {os.path.basename(nfo_path)}')
+                except Exception as exc:
+                    self.status_var.set(f'Erreur NFO : {exc}')
 
         elif mode == 'manga':
             exts = set()
@@ -1214,9 +2343,18 @@ class App(tk.Tk):
                 self.tree.item(iid, values=('  '+old_name, '  '+new_name, '⚠ ignoré'),
                     tags=('exists',)); skipped += 1; continue
             try:
-                try: os.chmod(fp, os.stat(fp).st_mode | stat.S_IWRITE)
-                except: pass
-                shutil.move(fp, dest)
+                # Essai 1 : os.rename (le plus fiable sur réseau SMB)
+                try:
+                    os.rename(fp, dest)
+                except OSError:
+                    # Essai 2 : shutil.move
+                    try:
+                        shutil.move(fp, dest)
+                    except OSError:
+                        # Essai 3 : copie + suppression (contourne WinError 5 réseau)
+                        shutil.copy2(fp, dest)
+                        try: os.remove(fp)
+                        except: pass
                 self.preview_data[file_idx] = (dest, new_name)
                 self.tree.item(iid, values=('  '+old_name, '  '+new_name, '✓ renommé'),
                     tags=('done',))
@@ -1226,7 +2364,8 @@ class App(tk.Tk):
                 label = '✕ accès refusé' if code == 5 else '✕ fichier ouvert' if code == 32 else '✕ erreur'
                 self.tree.item(iid, values=('  '+old_name, '  '+new_name, label),
                     tags=('error',))
-                errs.append(f'{old_name} : {exc}'); errors += 1
+                errs.append(f'{old_name} : [WinError {code}] {exc.strerror} — "{old_name}" -> "{new_name}"')
+                errors += 1
 
         if self.folder_preview_data:
             old_dir, new_dir = self.folder_preview_data[0]
@@ -1238,7 +2377,7 @@ class App(tk.Tk):
                     errs.append(f'[DOSSIER] {exc}'); errors += 1
 
         self.status_var.set(f'Terminé — {done} renommé(s), {skipped} ignoré(s), {errors} erreur(s)')
-        detail = ('\n\nDétails :\n' + '\n'.join(errs[:5])) if errs else ''
+        detail = ('\n\nDétails erreurs :\n' + '\n'.join(errs[:8])) if errs else ''
         messagebox.showinfo('Terminé',
             f'{done} renommé(s)\n{skipped} ignoré(s)\n{errors} erreur(s){detail}')
 
