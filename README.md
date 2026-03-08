@@ -34,6 +34,14 @@ ou [voir toutes les versions](https://github.com/loic31000/FileRenamer/releases)
 
 </div>
 
+<div align="center">
+
+### ⬇️ [Télécharger FileRenamer v1.0.0 — Windows (.zip)](https://github.com/loic31000/FileRenamer/releases/latest/download/FileRenamer-v1.0.0-Windows.zip)
+
+ou [voir toutes les versions](https://github.com/loic31000/FileRenamer/releases)
+
+</div>
+
 | Méthode | Lien |
 |---------|------|
 | **.exe autonome** (recommandé) | [FileRenamer-v2.0.0-Windows.zip](https://github.com/loic31000/FileRenamer/releases/latest/download/FileRenamer-v2.0.0-Windows.zip) |
