@@ -1,35 +1,44 @@
-# ── Build & Distribution ──────────────────────────────────────────
-dist/
-build/
-release/
-*.spec
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.spec
 
-# ── Environnements virtuels ───────────────────────────────────────
+# Release
+release/
+
+# Icônes générées (garder .ico et _48.png, ignorer les autres)
+icon_256.png
+/tmp/
+
+# Environnements virtuels
 venv/
 .venv/
 env/
-.env/
 
-# ── IDE ───────────────────────────────────────────────────────────
+# IDE
 .vscode/
 .idea/
 *.sublime-project
 *.sublime-workspace
 
-# ── OS ────────────────────────────────────────────────────────────
+# OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ── Logs & Rapports ───────────────────────────────────────────────
-*.log
-rapport_*.txt
-rapport_*.json
-
-# ── Sécurité ──────────────────────────────────────────────────────
-# Ne jamais committer de clés API
+# Clés API (ne jamais committer)
 *.env
-config_local.py
+.env
+config.json
+api_key.txt
+
+# Anciens screenshots
+screenshot_films.png
+screenshot_manga.png
+screenshot_v2.png
+screenshot_films_v2.png

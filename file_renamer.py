@@ -22,11 +22,12 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageTk
     from PIL.ExifTags import TAGS
     PIL_OK = True
 except ImportError:
     PIL_OK = False
+    ImageTk = None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -227,43 +228,47 @@ class RenameEngine:
 
     # Conventions film par logiciel
     # Plex / Emby / Jellyfin : Titre (Année).ext
-    # Kodi                   : Titre (Année).ext  (idem, standard NFO)
-    # Infuse                 : Titre (Année).ext
-    # MediaPortal            : Titre (Année).ext
-    # Tous partagent le même format de base — différences sur le nom de dossier
+    # Tous partagent le même format de base — vraie différence sur les séries
     VIDEO_CONVENTIONS = {
-        'plex':        ('Plex / Emby / Jellyfin', 'Titre (Année).ext'),
-        'kodi':        ('Kodi / XBMC',             'Titre (Année).ext'),
-        'infuse':      ('Infuse / Apple TV',        'Titre (Année).ext'),
-        'mediaportal': ('MediaPortal',              'Titre.ext'),
-        'tmdb':        ('Kodi/LibreELEC TMDb',       'Titre.Annee.ext'),
+        'plex':        ('Plex',                    'Titre (Année).ext'),
+        'kodi':        ('Kodi / LibreELEC',        'Titre (Année).ext'),
+        'jellyfin':    ('Jellyfin',                'Titre (Année).ext'),
+        'emby':        ('Emby',                    'Titre (Année).ext'),
+        'tmdb':        ('TMDb / Sonarr / Radarr',  'Titre.Annee.ext'),
     }
     SERIES_CONVENTIONS = {
-        'plex':        ('Plex / Emby / Jellyfin', 'Titre - S01E01.ext'),
-        'kodi':        ('Kodi / XBMC',             'Titre S01E01.ext'),
-        'infuse':      ('Infuse / Apple TV',        'Titre - S01E01.ext'),
-        'mediaportal': ('MediaPortal',              'Titre_S01E01.ext'),
-        'tmdb':        ('Kodi/LibreELEC TMDb',       'Titre.S01E01.ext'),
+        'plex':        ('Plex',                   'Titre - s01e01.ext'),   # tiret + minuscules
+        'kodi':        ('Kodi / LibreELEC',       'Titre S01E01.ext'),     # pas de tiret
+        'jellyfin':    ('Jellyfin',               'Titre S01E01.ext'),     # idem Kodi
+        'emby':        ('Emby',                   'Titre S01E01.ext'),     # idem Kodi
+        'tmdb':        ('TMDb / Sonarr',          'Titre.S01E01.ext'),     # points
     }
 
     def rename_movie(self, fp: str, convention: str = 'plex') -> str:
-        # tmdb : Titre.Annee.ext (points, pas d'espaces)
-        if convention == 'tmdb':
-            p     = Path(fp)
-            title = self.clean_title(p.name)
-            year  = self.extract_year(p.stem)
-            t_dots = title.replace(' ', '.')
-            if year:
-                return f"{t_dots}.{year}{p.suffix.lower()}"
-            return f"{t_dots}{p.suffix.lower()}"
-        p = Path(fp)
+        """
+        Conventions films (sources officielles) :
+          plex        → Titre (2010).mkv          support.plex.tv
+          jellyfin    → Titre (2010).mkv          jellyfin.org/docs
+          emby        → Titre (2010).mkv          emby.media/support
+          kodi        → Titre (2010).mkv          kodi.wiki (même format)
+          infuse      → Titre (2010).mkv          support.firecore.com
+          mediaportal → Titre (2010).mkv          team-mediaportal.com (même format)
+          tmdb        → Titre.2010.mkv            format points/dots (Radarr/Sonarr)
+        Pour les FILMS toutes les apps acceptent "Titre (Année)" — la différence
+        est uniquement sur les séries TV.
+        """
+        p     = Path(fp)
         title = self.clean_title(p.name)
         year  = self.extract_year(p.stem)
         ext   = p.suffix.lower()
-        if convention == 'mediaportal':
-            base = title
-        else:
-            base = f"{title} ({year})" if year else title
+
+        if convention == 'tmdb':
+            # Format Radarr/Sonarr avec points — Titre.2010.mkv
+            t_dots = title.replace(' ', '.')
+            return f"{t_dots}.{year}{ext}" if year else f"{t_dots}{ext}"
+
+        # Toutes les autres conventions : Titre (2010).mkv
+        base = f"{title} ({year})" if year else title
         return self.safe_filename(base + ext)
 
     # Alias pour compat
@@ -272,27 +277,44 @@ class RenameEngine:
 
     def rename_series(self, fp: str, convention: str = 'plex',
                       anime: bool = False) -> str:
+        """
+        Conventions séries TV (sources officielles) :
+          plex        → Titre - s01e01.mkv         support.plex.tv  (tiret + minuscules)
+          jellyfin    → Titre S01E01.mkv            jellyfin.org/docs (pas de tiret)
+          emby        → Titre S01E01.mkv            emby.media/support (idem Jellyfin)
+          kodi        → Titre S01E01.mkv            kodi.wiki/Episodes (scanner cherche SxxEyy)
+          infuse      → Titre S01E01.mkv            support.firecore.com (très flexible, S01E01 suffit)
+          mediaportal → Titre S01E01.mkv            team-mediaportal.com (SssEee standard)
+          tmdb        → Titre.S01E01.mkv            format points (Sonarr/LibreELEC)
+        """
         p = Path(fp)
         s, e, e2 = self.extract_season_episode(p.stem)
         title    = self.clean_title(p.name)
         ext      = p.suffix.lower()
         ep_w     = 3 if anime else 2   # 3 chiffres pour anime
+
         if s is not None and e is not None:
             if e2 is not None:
-                # Double episode
-                ep_str = f"S{s:02d}E{e:0{ep_w}d}-E{e2:0{ep_w}d}"
+                ep_str_upper = f"S{s:02d}E{e:0{ep_w}d}-E{e2:0{ep_w}d}"
+                ep_str_lower = f"s{s:02d}e{e:0{ep_w}d}-e{e2:0{ep_w}d}"
             else:
-                ep_str = f"S{s:02d}E{e:0{ep_w}d}"
+                ep_str_upper = f"S{s:02d}E{e:0{ep_w}d}"
+                ep_str_lower = f"s{s:02d}e{e:0{ep_w}d}"
+
             if convention == 'tmdb':
-                # Points entre mots, structure Kodi/TMDb
+                # Points entre mots — Titre.S01E01.mkv  (Sonarr/LibreELEC)
                 t_dots = title.replace(' ', '.')
-                return f"{t_dots}.{ep_str}{ext}"
-            elif convention == 'kodi':
-                return self.safe_filename(f"{title} {ep_str}{ext}")
-            elif convention == 'mediaportal':
-                return self.safe_filename(f"{title}_S{s:02d}E{e:02d}{ext}")
-            else:  # plex, infuse
-                return self.safe_filename(f"{title} - {ep_str}{ext}")
+                return f"{t_dots}.{ep_str_upper}{ext}"
+            elif convention == 'plex':
+                # Plex officiel : "ShowName - s01e01 - Optional_Info.ext" (tiret + minuscules)
+                return self.safe_filename(f"{title} - {ep_str_lower}{ext}")
+            elif convention in ('kodi', 'jellyfin', 'emby', 'infuse', 'mediaportal'):
+                # Kodi/Jellyfin/Emby/Infuse/MediaPortal : "ShowName S01E01.ext" (pas de tiret, majuscules)
+                return self.safe_filename(f"{title} {ep_str_upper}{ext}")
+            else:
+                # Défaut Plex
+                return self.safe_filename(f"{title} - {ep_str_lower}{ext}")
+
         elif e is not None:
             return self.safe_filename(f"{title} - E{e:03d}{ext}")
         return self.safe_filename(title + ext)
@@ -724,79 +746,85 @@ def ENT(parent, var, width=24, font_size=11):
 class App(tk.Tk):
 
     MODES = [
-        ('video',    '▶', 'Films & Séries'),
-        ('manga',    '◈', 'Mangas'),
-        ('book',     '◉', 'Livres & BD'),
-        ('photo',    '◎', 'Photos'),
-        ('custom',   '◆', 'Personnalisé'),
-        ('settings', '◍', 'Paramètres'),
+        ('video',    '▶',  'Vidéo'),
+        ('manga',    '◈',  'Manga'),
+        ('book',     '◉',  'Livres'),
+        ('photo',    '◎',  'Photos'),
+        ('custom',   '◆',  'Custom'),
+        ('settings', '◍',  'Réglages'),
     ]
 
+    MODE_COLOR = {
+        'video': '#f5a623', 'manga': '#f472b6', 'book': '#2dd4bf',
+        'photo': '#38bdf8', 'custom': '#a78bfa', 'settings': '#475569',
+    }
+
+    # ──────────────────────────────────────────────────────────────
     def __init__(self):
         super().__init__()
         self.title('FileRenamer')
-        self.geometry('1480x900')
-        self.minsize(1200, 720)
+        self.geometry('1480x860')
+        self.minsize(1100, 680)
         self.configure(bg=_BG)
 
-        # ── Variables ─────────────────────────────────────────────
-        # Clé API TMDb
-        self.tmdb_api_key        = tk.StringVar(value='')
-        self._tmdb               = None   # TMDbScraper instance (lazy)
-        self._anilist            = AniListScraper()
-        self.scraper_enabled     = tk.BooleanVar(value=True)
-
-        self.folder_var          = tk.StringVar()
-        self.recursive_var       = tk.BooleanVar(value=False)
-        self.rename_folder_var   = tk.BooleanVar(value=False)
-        self.video_mode          = tk.StringVar(value='film')
-        self.video_conv          = tk.StringVar(value='plex')
-        self.v_overwrite         = tk.BooleanVar(value=False)
-        self.v_multi_titles      = tk.BooleanVar(value=False)
-        self.v_nfo               = tk.BooleanVar(value=False)
-        self.v_anime             = tk.BooleanVar(value=False)
-        self.v_tmdb_id           = tk.StringVar()
-        self.manga_mode          = tk.StringVar(value='kobo')
-        self.manga_series        = tk.StringVar()
-        self.manga_year          = tk.StringVar()
-        self.manga_cbz           = tk.BooleanVar(value=True)
-        self.manga_cbr           = tk.BooleanVar(value=True)
-        self.manga_pdf           = tk.BooleanVar(value=True)
-        self.manga_epub          = tk.BooleanVar(value=True)
-        self.book_author         = tk.StringVar()
-        self.book_conv           = tk.StringVar(value='calibre')
-        self.book_pdf            = tk.BooleanVar(value=True)
-        self.book_epub           = tk.BooleanVar(value=True)
-        self.book_mobi           = tk.BooleanVar(value=True)
-        self.book_djvu           = tk.BooleanVar(value=False)
-        self.photo_prefix        = tk.StringVar()
-        self.photo_exif          = tk.BooleanVar(value=True)
-        self.custom_template     = tk.StringVar(value='{titre} ({année}){ext}')
-        self.custom_author       = tk.StringVar()
-        self.custom_prefix       = tk.StringVar()
-        self.custom_video        = tk.BooleanVar(value=True)
-        self.custom_book         = tk.BooleanVar(value=True)
-        self.custom_manga        = tk.BooleanVar(value=True)
-        self.custom_image        = tk.BooleanVar(value=True)
-        self.preview_data        = []
-        self._selected_files     = []   # fichiers choisis individuellement
-        self.folder_preview_data = []
-        self._pages              = {}
-        self._current_mode       = 'video'
-        self._nav_btns           = {}
+        # Variables
+        self.tmdb_api_key       = tk.StringVar(value='')
+        self._tmdb              = None
+        self._anilist           = AniListScraper()
+        self.scraper_enabled    = tk.BooleanVar(value=True)
+        self.folder_var         = tk.StringVar()
+        self.recursive_var      = tk.BooleanVar(value=False)
+        self.rename_folder_var  = tk.BooleanVar(value=False)
+        self.video_mode         = tk.StringVar(value='film')
+        self.video_conv         = tk.StringVar(value='plex')
+        self.v_overwrite        = tk.BooleanVar(value=False)
+        self.v_multi_titles     = tk.BooleanVar(value=False)
+        self.v_nfo              = tk.BooleanVar(value=False)
+        self.v_anime            = tk.BooleanVar(value=False)
+        self.v_tmdb_id          = tk.StringVar()
+        self.manga_mode         = tk.StringVar(value='kobo')
+        self.manga_series       = tk.StringVar()
+        self.manga_year         = tk.StringVar()
+        self.manga_cbz          = tk.BooleanVar(value=True)
+        self.manga_cbr          = tk.BooleanVar(value=True)
+        self.manga_pdf          = tk.BooleanVar(value=True)
+        self.manga_epub         = tk.BooleanVar(value=True)
+        self.book_author        = tk.StringVar()
+        self.book_conv          = tk.StringVar(value='calibre')
+        self.book_pdf           = tk.BooleanVar(value=True)
+        self.book_epub          = tk.BooleanVar(value=True)
+        self.book_mobi          = tk.BooleanVar(value=True)
+        self.book_djvu          = tk.BooleanVar(value=False)
+        self.photo_prefix       = tk.StringVar()
+        self.photo_exif         = tk.BooleanVar(value=True)
+        self.custom_template    = tk.StringVar(value='{titre} ({annee}){ext}')
+        self.custom_author      = tk.StringVar()
+        self.custom_prefix      = tk.StringVar()
+        self.custom_video       = tk.BooleanVar(value=True)
+        self.custom_book        = tk.BooleanVar(value=True)
+        self.custom_manga       = tk.BooleanVar(value=True)
+        self.custom_image       = tk.BooleanVar(value=True)
+        self.preview_data       = []
+        self._selected_files    = []
+        self.folder_preview_data= []
+        self._pages             = {}
+        self._current_mode      = 'video'
+        self._nav_btns          = {}
+        self._scrape_pending_id = None
+        self._refresh_pending_id= None
+        self._scrape_cache      = None   # dernier résultat scraper: {title,year,id,files,mode,anime}
 
         self._build_ui()
         self._apply_style()
-        self._animate_border()
+        self._load_icon()
 
-    # ── TTK ───────────────────────────────────────────────────────
-
+    # ── Style TTK ─────────────────────────────────────────────────
     def _apply_style(self):
         s = ttk.Style(self)
         s.theme_use('clam')
         s.configure('Treeview',
             background=_SURF, fieldbackground=_SURF,
-            foreground=_TEXT, font=FM(10), rowheight=28, borderwidth=0)
+            foreground=_TEXT, font=FM(10), rowheight=26, borderwidth=0)
         s.configure('Treeview.Heading',
             background=_PANEL, foreground=_AMBER,
             font=F(10, True), relief='flat')
@@ -807,66 +835,751 @@ class App(tk.Tk):
             background=_PANEL, troughcolor=_BG,
             borderwidth=0, arrowsize=10)
 
-    # ── Animation bordure header ──────────────────────────────────
+    def _load_icon(self):
+        """Charge icon.ico depuis le même dossier que le .py/.exe et l'applique."""
+        # Trouver le chemin de l'icône (compatible PyInstaller _MEIPASS)
+        if getattr(sys, 'frozen', False):
+            base = sys._MEIPASS
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        ico_path = os.path.join(base, 'icon.ico')
+        png_path = os.path.join(base, 'icon_48.png')
+        # Icône de la fenêtre (titlebar + taskbar)
+        if os.path.exists(ico_path):
+            try:
+                self.iconbitmap(ico_path)
+            except Exception:
+                pass
+        # Icône dans le header (logo visuel) — si Pillow dispo
+        if PIL_OK and ImageTk and os.path.exists(png_path):
+            try:
+                img = Image.open(png_path).resize((28, 28), Image.LANCZOS)
+                self._logo_img = ImageTk.PhotoImage(img)
+                # Remplacer le label texte "FR" par l'image
+                if hasattr(self, '_logo_lbl'):
+                    self._logo_lbl.configure(image=self._logo_img, text='', padx=0, pady=0)
+            except Exception:
+                pass
 
-    def _animate_border(self):
-        """Fait pulser subtilement la bordure amber du header."""
-        colors = [_AMBER, '#e8961a', '#d4850f', '#e8961a', _AMBER]
-        self._anim_idx = 0
-        def _step():
-            if hasattr(self, '_header_border'):
-                c = colors[self._anim_idx % len(colors)]
-                self._header_border.configure(bg=c)
-                self._anim_idx += 1
-                self.after(600, _step)
-        self.after(800, _step)
-
-    # ── Squelette ─────────────────────────────────────────────────
-
+    # ══════════════════════════════════════════════════════════════
+    #  BUILD UI — structure principale
+    # ══════════════════════════════════════════════════════════════
     def _build_ui(self):
-        self._build_header()
-        self._header_border = tk.Frame(self, bg=_AMBER, height=1)
-        self._header_border.pack(fill='x')
+        # Statut (bottom — packed first)
+        bar = tk.Frame(self, bg=_SURF, height=24)
+        bar.pack(fill='x', side='bottom')
+        tk.Frame(bar, bg=_BORDER, height=1).pack(fill='x', side='top')
+        self.status_var = tk.StringVar(value='Prêt — choisissez un dossier ou des fichiers')
+        tk.Label(bar, textvariable=self.status_var,
+            bg=_SURF, fg=_MUTED, font=FM(9), anchor='w').pack(
+            side='left', padx=12, fill='y')
+        tk.Label(bar, text='FileRenamer v3  ·  2026',
+            bg=_SURF, fg=_MUTED, font=FM(9)).pack(side='right', padx=12)
 
+        # Header
+        self._build_header()
+        tk.Frame(self, bg=_AMBER, height=2).pack(fill='x')
+
+        # Onglets modes (barre horizontale sous le header)
+        self._build_modebar()
+        tk.Frame(self, bg=_BORDER, height=1).pack(fill='x')
+
+        # Body
         body = tk.Frame(self, bg=_BG)
         body.pack(fill='both', expand=True)
 
-        # Col 1 : nav latérale (72px) — icônes
-        nav_col = tk.Frame(body, bg=_SURF, width=72)
-        nav_col.pack(side='left', fill='y')
-        nav_col.pack_propagate(False)
-        self._build_nav(nav_col)
-
+        # Panneau gauche options (304px)
+        self._opts_frame = tk.Frame(body, bg=_PANEL, width=304)
+        self._opts_frame.pack(side='left', fill='y')
+        self._opts_frame.pack_propagate(False)
         tk.Frame(body, bg=_BORDER, width=1).pack(side='left', fill='y')
 
-        # Col 2 : options du mode (380px)
-        self._page_area = tk.Frame(body, bg=_PANEL, width=390)
-        self._page_area.pack(side='left', fill='y')
-        self._page_area.pack_propagate(False)
-
-        tk.Frame(body, bg=_BORDER, width=1).pack(side='left', fill='y')
-
-        # Col 3 : prévisualisation
+        # Panneau droit preview
         right = tk.Frame(body, bg=_BG)
         right.pack(side='left', fill='both', expand=True)
         self._build_right(right)
 
-        # Barre statut
-        bar = tk.Frame(self, bg=_SURF, height=26)
-        bar.pack(fill='x', side='bottom')
-        tk.Frame(bar, bg=_BORDER, height=1).pack(fill='x', side='top')
-        self.status_var = tk.StringVar(value='Prêt')
-        tk.Label(bar, textvariable=self.status_var,
-            bg=_SURF, fg=_MUTED, font=FM(9), anchor='w').pack(
-            side='left', padx=14, fill='y')
-        tk.Label(bar, text='FileRenamer v4  ·  2026',
-            bg=_SURF, fg=_MUTED, font=FM(9)).pack(side='right', padx=14)
-
+        # Pages (dans _opts_frame)
         self._build_all_pages()
         self._show_page('video')
 
+    # ── Header ───────────────────────────────────────────────────
+    def _build_header(self):
+        hdr = tk.Frame(self, bg=_SURF)
+        hdr.pack(fill='x')
+        row = tk.Frame(hdr, bg=_SURF)
+        row.pack(fill='x', padx=14, pady=8)
 
-    # ── Scraper helpers ───────────────────────────────────────────
+        # Logo (remplacé par icône PNG si disponible via _load_icon)
+        self._logo_lbl = tk.Label(row, text='FR', font=F(14, True),
+            fg=_BG, bg=_AMBER, padx=8, pady=1)
+        self._logo_lbl.pack(side='left')
+        tk.Label(row, text=' FileRenamer',
+            font=F(13, True), fg=_TEXT, bg=_SURF).pack(side='left')
+
+        # Barre dossier (expandable)
+        fb = tk.Frame(row, bg=_BORDER)
+        fb.pack(side='left', fill='x', expand=True, padx=14)
+        tk.Label(fb, text='📁', bg=_BORDER, fg=_AMBER,
+            font=F(11)).pack(side='left', padx=(7,3), pady=3)
+        tk.Entry(fb, textvariable=self.folder_var,
+            font=FM(10), bg=_BORDER, fg=_TEXT,
+            insertbackground=_AMBER, relief='flat', bd=0).pack(
+            side='left', fill='x', expand=True, pady=4)
+        # Séparateur vertical
+        tk.Frame(fb, bg=_MUTED, width=1).pack(side='left', fill='y', pady=3)
+        BTN(fb, '📁 Dossier', self._browse_folder,
+            bg=_AMBER, fg=_BG, bold=True, pad=(9,4)).pack(side='left', padx=(1,1))
+        BTN(fb, '🎬 Fichiers', self._browse_files,
+            bg=_CARD2, fg=_AMBER, bold=True, pad=(9,4)).pack(side='left', padx=(0,1))
+
+        # Options inline (right of folder bar)
+        chk_f = tk.Frame(row, bg=_SURF)
+        chk_f.pack(side='left', padx=(8,0))
+        CHK(chk_f, 'Récursif',   self.recursive_var,   fg=_CYAN,  size=9).pack(anchor='w')
+        CHK(chk_f, 'Dossier',    self.rename_folder_var, fg=_TEAL, size=9).pack(anchor='w')
+
+        # Admin (Windows only)
+        if sys.platform == 'win32':
+            try:    _ok = is_admin()
+            except: _ok = False
+            af = tk.Frame(row, bg=_SURF)
+            af.pack(side='right', padx=8)
+            if _ok:
+                tk.Label(af, text='✓ Admin', font=F(9, True),
+                    fg=_GREEN, bg=_SURF).pack()
+            else:
+                def _rel():
+                    if relaunch_as_admin(): self.destroy()
+                BTN(af, '⚠ Admin', _rel,
+                    bg=_ORANGE, fg=_BG, bold=True, pad=(8,3)).pack()
+
+        # Trace dossier → scraper
+        def _on_folder_change(*_):
+            d = self.folder_var.get().strip()
+            if d and os.path.isdir(d):
+                self._trigger_scrape(d, delay=700)
+        self.folder_var.trace_add('write', _on_folder_change)
+
+    # ── Barre de modes (onglets horizontaux) ─────────────────────
+    def _build_modebar(self):
+        bar = tk.Frame(self, bg=_SURF)
+        bar.pack(fill='x')
+
+        for mode_id, icon, label in self.MODES:
+            color = self.MODE_COLOR[mode_id]
+
+            cell = tk.Frame(bar, bg=_SURF, cursor='hand2')
+            cell.pack(side='left')
+
+            # Indicateur bas (coloré quand actif)
+            ind = tk.Frame(cell, bg=_SURF, height=3)
+            ind.pack(side='bottom', fill='x')
+
+            lbl = tk.Label(cell,
+                text=f'{icon}  {label}',
+                font=F(10, True), fg=_MUTED, bg=_SURF,
+                padx=18, pady=6, cursor='hand2')
+            lbl.pack()
+
+            all_w = [cell, lbl]
+            for w in all_w:
+                w.bind('<Button-1>', lambda e, m=mode_id: self._show_page(m))
+
+            def _enter(e, ws=all_w):
+                for w in ws:
+                    try: w.configure(bg=_CARD)
+                    except: pass
+            def _leave(e, ws=all_w, m=mode_id):
+                active = self._current_mode == m
+                for w in ws:
+                    try: w.configure(bg=_CARD2 if active else _SURF)
+                    except: pass
+            for w in all_w:
+                w.bind('<Enter>', _enter)
+                w.bind('<Leave>', _leave)
+
+            self._nav_btns[mode_id] = (cell, lbl, ind, color)
+
+    def _show_page(self, mode_id):
+        self._pages['_current'] = mode_id
+        self._current_mode = mode_id
+
+        if mode_id in ('video', 'manga', 'book'):
+            d = self.folder_var.get().strip()
+            if self._selected_files:
+                self._trigger_scrape_files(list(self._selected_files), delay=300)
+            elif d and os.path.isdir(d):
+                self._trigger_scrape(d, delay=300)
+
+        # Reset tous
+        for pid, page in self._pages.items():
+            if pid == '_current': continue
+            page.place_forget()
+            cell, lbl, ind, col = self._nav_btns[pid]
+            cell.configure(bg=_SURF)
+            lbl.configure(bg=_SURF, fg=_MUTED)
+            ind.configure(bg=_SURF)
+
+        # Activer
+        self._pages[mode_id].place(x=0, y=0, relwidth=1, relheight=1)
+        cell, lbl, ind, color = self._nav_btns[mode_id]
+        cell.configure(bg=_CARD2)
+        lbl.configure(bg=_CARD2, fg=color)
+        ind.configure(bg=color)
+
+    # ══════════════════════════════════════════════════════════════
+    #  PAGES OPTIONS
+    # ══════════════════════════════════════════════════════════════
+    def _build_all_pages(self):
+        for mode_id, _, _ in self.MODES:
+            page = tk.Frame(self._opts_frame, bg=_PANEL)
+            self._pages[mode_id] = page
+            getattr(self, f'_page_{mode_id}')(page)
+
+    # ── Widget helpers ────────────────────────────────────────────
+    def _sec(self, p, text, color=_AMBER):
+        """En-tête de section compact."""
+        f = tk.Frame(p, bg=_PANEL)
+        f.pack(fill='x', padx=8, pady=(8, 2))
+        tk.Frame(f, bg=color, width=2, height=13).pack(side='left')
+        tk.Label(f, text=text, font=F(9, True), fg=color,
+            bg=_PANEL, padx=5).pack(side='left', anchor='w')
+
+    def _seg_btns(self, p, opts, var, color):
+        """Boutons segmentés (remplace radio cards scrollables)."""
+        row = tk.Frame(p, bg=_PANEL)
+        row.pack(fill='x', padx=8, pady=(2, 0))
+        btns = {}
+
+        def _refresh(*_):
+            for val, (btn, sep) in btns.items():
+                sel = var.get() == val
+                btn.configure(
+                    bg=color if sel else _CARD,
+                    fg=_BG   if sel else _TEXT2)
+
+        for i, (val, label) in enumerate(opts):
+            # Séparateur 1px entre boutons
+            if i > 0:
+                tk.Frame(row, bg=_BORDER, width=1).pack(side='left', fill='y', pady=1)
+            b = tk.Button(row, text=label,
+                font=F(9, True), bg=_CARD, fg=_TEXT2,
+                relief='flat', bd=0, cursor='hand2',
+                padx=10, pady=6,
+                activebackground=_CARD2, activeforeground=color,
+                command=lambda v=val: var.set(v))
+            b.pack(side='left', fill='x', expand=True)
+            btns[val] = (b, None)
+
+        var.trace_add('write', _refresh)
+        _refresh()
+
+    def _example_lbl(self, p, var, exmap, color):
+        """Label d'exemple dynamique sous les boutons segmentés."""
+        lbl = tk.Label(p, text='', font=FM(9), fg=color,
+            bg=_PANEL, anchor='w', padx=10)
+        lbl.pack(fill='x', pady=(1, 5))
+        def _upd(*_):
+            lbl.configure(text='→ ' + exmap.get(var.get(), ''))
+        var.trace_add('write', _upd)
+        _upd()
+
+    def _field_row(self, p, label, var, hint='', color=_TEXT2):
+        """Champ texte compact sur une ligne."""
+        row = tk.Frame(p, bg=_PANEL)
+        row.pack(fill='x', padx=8, pady=2)
+        tk.Label(row, text=label, font=F(9), fg=color,
+            bg=_PANEL, width=7, anchor='e').pack(side='left')
+        ent = tk.Entry(row, textvariable=var,
+            font=FM(10), bg=_CARD, fg=_TEXT,
+            insertbackground=_AMBER, relief='flat',
+            highlightthickness=1, highlightcolor=_AMBER,
+            highlightbackground=_BORDER, bd=3)
+        ent.pack(side='left', fill='x', expand=True, padx=(4, 0))
+        if hint:
+            tk.Label(row, text=hint, font=F(8), fg=_MUTED,
+                bg=_PANEL).pack(side='left', padx=4)
+
+    def _fmt_row(self, p, items):
+        """Checkboxes formats sur une ligne."""
+        row = tk.Frame(p, bg=_PANEL)
+        row.pack(fill='x', padx=8, pady=(2, 4))
+        for text, var, color in items:
+            tk.Checkbutton(row, text=text, variable=var,
+                font=F(9, True), fg=color, bg=_PANEL,
+                selectcolor=_CARD, activebackground=_PANEL,
+                activeforeground=color,
+                relief='flat', cursor='hand2').pack(side='left', padx=(0, 8))
+
+    def _run_btn(self, p, mode_id, label='Analyser'):
+        """Bouton analyser compact."""
+        f = tk.Frame(p, bg=_PANEL)
+        f.pack(fill='x', padx=8, pady=(6, 10), side='bottom')
+        tk.Frame(f, bg=_BORDER, height=1).pack(fill='x', pady=(0, 5))
+        BTN(f, f'  {label}  →',
+            lambda: self._run_preview(mode_id),
+            bg=_AMBER, fg=_BG, size=10, bold=True, pad=(0, 7)
+        ).pack(fill='x')
+
+    # ── Page Vidéo ────────────────────────────────────────────────
+    def _page_video(self, p):
+        self._sec(p, 'TYPE DE CONTENU')
+        self._seg_btns(p, [
+            ('film',  '🎬 Film'),
+            ('serie', '📺 Série'),
+            ('anime', '🎌 Anime'),
+        ], self.video_mode, _AMBER)
+
+        # Exemple dynamique type + convention
+        ex_type = {
+            'film': {
+                'plex':        'Inception (2010).mkv',
+                'kodi':        'Inception (2010).mkv',
+                'jellyfin':    'Inception (2010).mkv',
+                'emby':        'Inception (2010).mkv',
+                'infuse':      'Inception (2010).mkv',
+                'mediaportal': 'Inception (2010).mkv',
+                'tmdb':        'Inception.2010.mkv'},
+            'serie': {
+                'plex':        'Breaking Bad - s01e01.mkv',   # tiret + minuscules (officiel Plex)
+                'kodi':        'Breaking Bad S01E01.mkv',     # pas de tiret (officiel Kodi)
+                'jellyfin':    'Breaking Bad S01E01.mkv',     # idem Kodi (officiel Jellyfin)
+                'emby':        'Breaking Bad S01E01.mkv',     # idem Kodi (officiel Emby)
+                'infuse':      'Breaking Bad S01E01.mkv',     # idem (officiel Infuse)
+                'mediaportal': 'Breaking Bad S01E01.mkv',     # idem (officiel MP)
+                'tmdb':        'Breaking.Bad.S01E01.mkv'},
+            'anime': {
+                'plex':        'Demon Slayer - s01e007.mkv',
+                'kodi':        'Demon Slayer S01E007.mkv',
+                'jellyfin':    'Demon Slayer S01E007.mkv',
+                'emby':        'Demon Slayer S01E007.mkv',
+                'infuse':      'Demon Slayer S01E007.mkv',
+                'mediaportal': 'Demon Slayer S01E007.mkv',
+                'tmdb':        'Demon.Slayer.S01E007.mkv'},
+        }
+        ex_lbl = tk.Label(p, text='', font=FM(9), fg=_AMBER,
+            bg=_PANEL, anchor='w', padx=10)
+        ex_lbl.pack(fill='x', pady=(1, 5))
+        def _upd_ex(*_):
+            m = self.video_mode.get(); c = self.video_conv.get()
+            ex_lbl.configure(text='→ ' + ex_type.get(m, {}).get(c, ''))
+        self.video_mode.trace_add('write', _upd_ex)
+        self.video_conv.trace_add('write', _upd_ex)
+        _upd_ex()
+
+        self._sec(p, 'CONVENTION', _CYAN)
+        # Ligne 1 : lecteurs grand public
+        self._seg_btns(p, [
+            ('plex',     'Plex'),
+            ('kodi',     'Kodi'),
+            ('jellyfin', 'Jellyfin'),
+            ('emby',     'Emby'),
+        ], self.video_conv, _CYAN)
+        # Ligne 2 : outils automatisation
+        self._seg_btns(p, [
+            ('tmdb',     'TMDb / Sonarr / Radarr'),
+        ], self.video_conv, _CYAN)
+
+        self._sec(p, 'OPTIONS', _MUTED)
+        opt_f = tk.Frame(p, bg=_PANEL)
+        opt_f.pack(fill='x', padx=8, pady=2)
+        CHK(opt_f, 'Multi-titres', self.v_multi_titles, fg=_AMBER, size=9).pack(
+            side='left', padx=(0, 10))
+        CHK(opt_f, 'Écraser', self.v_overwrite, fg=_ORANGE, size=9).pack(side='left')
+        nfo_f = tk.Frame(p, bg=_PANEL)
+        nfo_f.pack(fill='x', padx=8, pady=(2, 0))
+        CHK(nfo_f, 'Générer .nfo (Kodi)', self.v_nfo, fg=_TEAL, size=9).pack(
+            side='left', padx=(0, 6))
+        self._field_row(p, 'ID TMDb', self.v_tmdb_id, hint='ex: 1396')
+
+        # Traces
+        def _on_type(*_):
+            self._tmdb_banner.pack_forget()
+            d = self.folder_var.get().strip()
+            if self._selected_files:
+                self._trigger_scrape_files(list(self._selected_files), delay=200)
+            elif d and os.path.isdir(d):
+                self._trigger_scrape(d, delay=200)
+        self.video_mode.trace_add('write', _on_type)
+        self.video_conv.trace_add('write', self._refresh_preview)
+
+        self._run_btn(p, 'video', 'Analyser Films & Séries')
+
+    # ── Page Manga ────────────────────────────────────────────────
+    def _page_manga(self, p):
+        self._sec(p, 'LECTEUR', _PINK)
+        self._seg_btns(p, [
+            ('kobo',  'Kobo'),
+            ('pc',    'PC / Komga'),
+            ('mylar', 'Mylar3'),
+        ], self.manga_mode, _PINK)
+        self._example_lbl(p, self.manga_mode, {
+            'kobo':  'One Piece - T042.cbz',
+            'pc':    'One Piece v042.cbz',
+            'mylar': 'One Piece (1997) #042.cbz',
+        }, _PINK)
+
+        self._mylar_warn = tk.Label(p,
+            text='⚠  Mylar3 : année obligatoire pour le format complet',
+            font=F(9), fg=_ORANGE, bg=_PANEL, anchor='w', padx=10)
+
+        self._sec(p, 'SÉRIE', _PINK)
+        self._field_row(p, 'Série :', self.manga_series, hint='auto si vide')
+        self._field_row(p, 'Année :', self.manga_year)
+
+        self._sec(p, 'FORMATS', _PINK)
+        self._fmt_row(p, [
+            ('CBZ', self.manga_cbz, _PINK), ('CBR', self.manga_cbr, _PINK),
+            ('PDF', self.manga_pdf, _ORANGE), ('EPUB', self.manga_epub, _CYAN),
+        ])
+
+        # Traces
+        def _chk_mylar(*_):
+            if self.manga_mode.get() == 'mylar':
+                self._mylar_warn.pack(fill='x', after=p.winfo_children()[3])
+            else:
+                self._mylar_warn.pack_forget()
+        def _on_manga_mode(*_):
+            _chk_mylar()
+            self._refresh_preview()
+            d = self.folder_var.get().strip()
+            if d and os.path.isdir(d):
+                self._tmdb_banner.pack_forget()
+                self.after(300, lambda: self._auto_scrape(d))
+        self.manga_mode.trace_add('write', _on_manga_mode)
+        self.manga_series.trace_add('write', self._refresh_preview_delayed)
+        self.manga_year.trace_add('write', self._refresh_preview_delayed)
+        _chk_mylar()
+
+        self._run_btn(p, 'manga', 'Analyser Mangas')
+
+    # ── Page Livres ───────────────────────────────────────────────
+    def _page_book(self, p):
+        self._sec(p, 'LOGICIEL', _TEAL)
+        self._seg_btns(p, [
+            ('calibre', 'Calibre'),
+            ('kobo',    'Kobo'),
+            ('kindle',  'Kindle'),
+            ('adobe',   'Adobe'),
+        ], self.book_conv, _TEAL)
+        self._example_lbl(p, self.book_conv, {
+            'calibre': 'Tolkien - Le Seigneur des Anneaux (2001).epub',
+            'kobo':    'Le Seigneur des Anneaux - Tolkien.epub',
+            'kindle':  'Le Seigneur des Anneaux - Tolkien.epub',
+            'adobe':   'Tolkien - Le Seigneur des Anneaux.epub',
+        }, _TEAL)
+
+        self._sec(p, 'AUTEUR', _TEAL)
+        self._field_row(p, 'Auteur :', self.book_author, hint='auto si vide')
+
+        self._sec(p, 'FORMATS', _TEAL)
+        self._fmt_row(p, [
+            ('PDF', self.book_pdf, _ORANGE), ('EPUB', self.book_epub, _CYAN),
+            ('MOBI', self.book_mobi, _GREEN), ('DJVU', self.book_djvu, _MUTED),
+        ])
+
+        def _on_book(*_):
+            self._refresh_preview()
+            d = self.folder_var.get().strip()
+            if d and os.path.isdir(d):
+                self._tmdb_banner.pack_forget()
+                self.after(300, lambda: self._auto_scrape(d))
+        self.book_conv.trace_add('write', _on_book)
+        self.book_author.trace_add('write', self._refresh_preview_delayed)
+
+        self._run_btn(p, 'book', 'Analyser Livres & BD')
+
+    # ── Page Photos ───────────────────────────────────────────────
+    def _page_photo(self, p):
+        self._sec(p, 'RENOMMAGE PAR DATE', _CYAN)
+        tk.Label(p, text='→ 20231225_143022_vacances.jpg',
+            font=FM(9), fg=_CYAN, bg=_PANEL, anchor='w', padx=10).pack(
+            fill='x', pady=(0, 4))
+        self._field_row(p, 'Suffixe :', self.photo_prefix, hint='ex: vacances')
+        opt = tk.Frame(p, bg=_PANEL)
+        opt.pack(fill='x', padx=8, pady=4)
+        CHK(opt, 'Date EXIF (prise de vue)', self.photo_exif, fg=_CYAN, size=9).pack(anchor='w')
+        pil_c = _GREEN if PIL_OK else _ORANGE
+        tk.Label(p, text=('✓ Pillow OK — EXIF actif' if PIL_OK else '⚠ pip install pillow'),
+            font=F(9), fg=pil_c, bg=_PANEL, anchor='w', padx=10).pack(fill='x')
+        self._run_btn(p, 'photo', 'Analyser Photos')
+
+    # ── Page Custom ───────────────────────────────────────────────
+    def _page_custom(self, p):
+        self._sec(p, 'MODÈLE', _VIOLET)
+        tk.Label(p,
+            text='{titre}  {annee}  {ext}  {saison}  {episode}  {tome}  {auteur}  {date}  {prefixe}',
+            font=FM(9), fg=_MUTED, bg=_PANEL, anchor='w', padx=10,
+            justify='left').pack(fill='x', pady=(0, 2))
+        self._field_row(p, 'Modèle :', self.custom_template)
+        self._sec(p, 'VALEURS', _VIOLET)
+        self._field_row(p, 'Auteur :', self.custom_author)
+        self._field_row(p, 'Préfixe :', self.custom_prefix)
+        self._sec(p, 'TYPES', _VIOLET)
+        self._fmt_row(p, [
+            ('Vidéo', self.custom_video, _AMBER),
+            ('Livre', self.custom_book,  _CYAN),
+            ('Manga', self.custom_manga, _PINK),
+            ('Image', self.custom_image, _GREEN),
+        ])
+        self._run_btn(p, 'custom', 'Analyser Custom')
+
+    # ── Page Réglages ─────────────────────────────────────────────
+    def _page_settings(self, p):
+        self._sec(p, 'API TMDB', _CYAN)
+        tk.Label(p, text='Clé gratuite : themoviedb.org/settings/api',
+            font=F(9), fg=_MUTED, bg=_PANEL, anchor='w', padx=10).pack(
+            fill='x', pady=(0, 2))
+        self._field_row(p, 'Clé API :', self.tmdb_api_key)
+        test_f = tk.Frame(p, bg=_PANEL)
+        test_f.pack(fill='x', padx=8, pady=4)
+        self._api_status = tk.Label(test_f, text='', font=F(9),
+            fg=_MUTED, bg=_PANEL, anchor='w')
+        self._api_status.pack(anchor='w', pady=(0, 4))
+        def _test():
+            self._api_status.configure(text='Test en cours...', fg=_MUTED)
+            self.update_idletasks()
+            def _run():
+                try:
+                    r = self._get_tmdb().search_movie('Inception', '2010')
+                    msg = f'✓ OK — {r[0]["title"]} ({r[0]["year"]})' if r else '✓ Connecté'
+                    self.after(0, lambda: self._api_status.configure(text=msg, fg=_GREEN))
+                except Exception as exc:
+                    self.after(0, lambda: self._api_status.configure(
+                        text=f'✗ {exc}', fg=_RED))
+            threading.Thread(target=_run, daemon=True).start()
+        BTN(test_f, 'Tester connexion TMDb', _test,
+            bg=_CYAN, fg=_BG, bold=True, pad=(8, 5)).pack(anchor='w')
+
+        self._sec(p, 'SCRAPER', _CYAN)
+        CHK(p, 'Activer TMDb / AniList / OpenLibrary',
+            self.scraper_enabled, fg=_CYAN, size=9).pack(anchor='w', padx=10, pady=4)
+
+        self._sec(p, 'APIs GRATUITES', _MUTED)
+        for k, v in [('AniList', 'graphql.anilist.co — sans clé'),
+                     ('OpenLib', 'openlibrary.org — sans clé')]:
+            row = tk.Frame(p, bg=_CARD)
+            row.pack(fill='x', padx=8, pady=1)
+            tk.Label(row, text=k, font=F(9, True), fg=_TEXT2,
+                bg=_CARD, width=8, anchor='e').pack(side='left', padx=(6,4), pady=4)
+            tk.Label(row, text=v, font=F(9), fg=_MUTED, bg=_CARD).pack(side='left')
+
+    # ══════════════════════════════════════════════════════════════
+    #  PANNEAU DROIT — Bannière + Treeview + Actions
+    # ══════════════════════════════════════════════════════════════
+    def _build_right(self, parent):
+        # ── Zone bannière scraper ─────────────────────────────────
+        self._banner_area = tk.Frame(parent, bg=_BG)
+        self._banner_area.pack(fill='x')
+        self._tmdb_banner = tk.Frame(self._banner_area, bg='#071828')
+        # (sera pack/unpack par _show_tmdb_banner)
+
+        # ── Header preview ────────────────────────────────────────
+        phdr = tk.Frame(parent, bg=_PANEL)
+        phdr.pack(fill='x')
+
+        # Colonne gauche : label + hint
+        ph_left = tk.Frame(phdr, bg=_PANEL)
+        ph_left.pack(side='left', fill='y', padx=(12, 4), pady=6)
+        tk.Label(ph_left, text='PRÉVISUALISATION',
+            font=F(10, True), fg=_AMBER, bg=_PANEL).pack(side='left')
+        tk.Label(ph_left, text=' · double-clic = aperçu',
+            font=F(9), fg=_MUTED, bg=_PANEL).pack(side='left')
+
+        # Colonne droite : compteur
+        self.count_label = tk.Label(phdr, text='',
+            font=FM(9), fg=_CYAN, bg=_PANEL)
+        self.count_label.pack(side='right', padx=12)
+        tk.Frame(parent, bg=_AMBER, height=1).pack(fill='x')
+
+        # ── Treeview ──────────────────────────────────────────────
+        tf = tk.Frame(parent, bg=_SURF)
+        self._tree_frame = tf
+        tf.pack(fill='both', expand=True)
+
+        self.tree = ttk.Treeview(tf,
+            columns=('avant', 'apres', 'statut'),
+            show='headings', selectmode='extended')
+        self.tree.heading('avant',  text='  Nom original')
+        self.tree.heading('apres',  text='  Nouveau nom')
+        self.tree.heading('statut', text='Statut')
+        self.tree.column('avant',  width=430, minwidth=160)
+        self.tree.column('apres',  width=430, minwidth=160)
+        self.tree.column('statut', width=120, minwidth=70, anchor='center')
+
+        sb_y = ttk.Scrollbar(tf, orient='vertical',   command=self.tree.yview)
+        sb_x = ttk.Scrollbar(tf, orient='horizontal', command=self.tree.xview)
+        self.tree.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
+        self.tree.grid(row=0, column=0, sticky='nsew')
+        sb_y.grid(row=0, column=1, sticky='ns')
+        sb_x.grid(row=1, column=0, sticky='ew')
+        tf.rowconfigure(0, weight=1)
+        tf.columnconfigure(0, weight=1)
+
+        # Tags couleur par ligne entière (via tag sur la row)
+        self.tree.tag_configure('ok',     foreground=_GREEN,  background='#0d1f15')
+        self.tree.tag_configure('same',   foreground=_MUTED,  background=_SURF)
+        self.tree.tag_configure('exists', foreground=_ORANGE, background='#1f1408')
+        self.tree.tag_configure('done',   foreground=_CYAN,   background='#071828')
+        self.tree.tag_configure('error',  foreground=_RED,    background='#1f0808')
+        self.tree.bind('<Double-1>', self._show_preview_popup)
+
+        # ── Barre actions ─────────────────────────────────────────
+        tk.Frame(parent, bg=_BORDER, height=1).pack(fill='x')
+        act = tk.Frame(parent, bg=_BG)
+        act.pack(fill='x', padx=8, pady=(5, 6))
+
+        # Ligne 1 : sélection + export
+        row1 = tk.Frame(act, bg=_BG)
+        row1.pack(fill='x', pady=(0, 4))
+        self.sel_all_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(row1, text='Tout sélectionner',
+            variable=self.sel_all_var, font=F(9), fg=_TEXT2, bg=_BG,
+            selectcolor=_CARD, activebackground=_BG, relief='flat',
+            cursor='hand2', command=self._toggle_select).pack(side='left', padx=(0, 8))
+        BTN(row1, '✕ Effacer', self._clear,
+            bg=_PANEL, fg=_TEXT2, size=9, pad=(8, 4)).pack(side='left')
+        BTN(row1, '↓ Rapport', self._export_log,
+            bg=_PANEL, fg=_TEXT2, size=9, pad=(8, 4)).pack(side='right')
+
+        # Ligne 2 : bouton principal
+        self.apply_btn = BTN(act,
+            '  ✓  Renommer les fichiers sélectionnés  ',
+            self._apply, bg=_GREEN, fg=_BG, size=11, bold=True, pad=(0, 8))
+        self.apply_btn.pack(fill='x')
+        self.apply_btn.configure(state='disabled')
+
+    # ── Bannière scraper (redesign compact + lisible) ─────────────
+    def _show_tmdb_banner(self, results, mode, files, conv, anime=False):
+        ban = self._tmdb_banner
+        for w in ban.winfo_children():
+            w.destroy()
+        if not results:
+            ban.pack_forget()
+            return
+
+        choices    = [f"{r['title']}  ({r['year']})" for r in results]
+        choice_var = tk.StringVar(value=choices[0])
+
+        # Label source
+        _src = {
+            'video_film':  ('🎬', 'TMDb Films',   _AMBER),
+            'video_serie': ('📺', 'TMDb Séries',  _CYAN),
+            'video_anime': ('🎌', 'AniList Anime', _PINK),
+            'manga':       ('📚', 'AniList',       _PINK),
+            'book':        ('📖', 'Open Library',  _TEAL),
+        }
+        ico, src_name, src_color = _src.get(mode, ('🔍', 'Scraper', _MUTED))
+
+        # Container principal
+        main = tk.Frame(ban, bg='#071828')
+        main.pack(fill='x', padx=8, pady=(5, 0))
+
+        # Badge source
+        badge = tk.Frame(main, bg=src_color)
+        badge.pack(side='left', padx=(0, 8))
+        tk.Label(badge, text=f'{ico}  {src_name}',
+            font=F(9, True), fg=_BG, bg=src_color,
+            padx=8, pady=4).pack()
+
+        # Menu sélection résultat
+        opt = tk.OptionMenu(main, choice_var, *choices)
+        opt.configure(
+            font=F(10, True), bg='#0d2540', fg=_TEXT,
+            activebackground='#1a4060', activeforeground=_AMBER,
+            highlightthickness=0, relief='flat', bd=0,
+            padx=10, pady=4, anchor='w')
+        opt['menu'].configure(
+            font=F(10), bg='#0d2540', fg=_TEXT,
+            activebackground=_SEL, activeforeground=_AMBER,
+            relief='flat', bd=1)
+        opt.pack(side='left', fill='x', expand=True, padx=(0, 8))
+
+        # Boutons action
+        def _accept():
+            idx = choices.index(choice_var.get())
+            self._apply_scrape_result(results[idx], mode, files, conv, anime)
+            ban.pack_forget()
+
+        def _edit():
+            idx = choices.index(choice_var.get())
+            self._scrape_edit_popup(results[idx], mode, files, conv, anime)
+
+        BTN(main, '✓ Accepter', _accept,
+            bg=_GREEN, fg=_BG, bold=True, pad=(10, 4)).pack(side='left', padx=(0, 3))
+        BTN(main, '✎ Corriger', _edit,
+            bg='#1a4060', fg=_TEXT2, pad=(8, 4)).pack(side='left', padx=(0, 3))
+        BTN(main, '✕', ban.pack_forget,
+            bg='#071828', fg=_MUTED, pad=(6, 4)).pack(side='right')
+
+        # Sous-ligne info (ID + titre original)
+        info_f = tk.Frame(ban, bg='#071828')
+        info_f.pack(fill='x', padx=8, pady=(2, 5))
+        info_lbl = tk.Label(info_f, text='',
+            font=FM(9), fg='#3a6080', bg='#071828', anchor='w')
+        info_lbl.pack(side='left')
+
+        def _upd_info(*_):
+            idx  = choices.index(choice_var.get())
+            r    = results[idx]
+            orig = r.get('original_title') or r.get('romaji') or r.get('author') or ''
+            txt  = f"ID {r['id']}"
+            if orig and orig != r['title']:
+                txt += f'  ·  {orig}'
+            if r.get('year') and r['year'] != '?':
+                txt += f'  ·  {r["year"]}'
+            info_lbl.configure(text=txt)
+        choice_var.trace_add('write', _upd_info)
+        _upd_info()
+
+        # Pack la bannière dans sa zone
+        ban.pack(in_=self._banner_area, fill='x')
+        tk.Frame(self._banner_area, bg=_BORDER, height=1).pack(
+            in_=self._banner_area, fill='x')
+
+
+    def _refresh_preview(self, *_):
+        """Rafraîchit la preview quand la convention change.
+        Appelé par trace sur video_conv, manga_mode, book_conv.
+        Utilise le cache scraper si disponible (conserve le titre TMDb/AniList).
+        Sinon recalcule depuis les fichiers du dossier."""
+        mode_id = self._current_mode
+        if mode_id not in ('video', 'manga', 'book', 'photo', 'custom'):
+            return
+
+        # Pas de preview à rafraîchir si aucun fichier n'a été analysé
+        if not self.preview_data:
+            return
+
+        if self._scrape_cache and mode_id in ('video', 'manga'):
+            # Reconstruire depuis le cache scraper (titre TMDb/AniList conservé)
+            # after(1) pour laisser tkinter finir de traiter l'événement avant de modifier le treeview
+            self.after(1, self._rebuild_from_cache)
+        else:
+            # Recalculer depuis les noms de fichiers (sans scraper)
+            self.after(1, lambda: self._run_preview(mode_id, silent=True))
+
+    def _rebuild_from_cache(self):
+        """Rebuilder la preview depuis le cache scraper (quand convention change)."""
+        c = self._scrape_cache
+        if not c:
+            return
+        conv = self.video_conv.get() if 'video' in c['mode'] else \
+               self.manga_mode.get() if c['mode'] == 'manga' else self.book_conv.get()
+        self._apply_scrape_result(
+            {'title': c['title'], 'year': c['year'], 'id': c['id']},
+            c['mode'], c['files'], conv, c.get('anime', False)
+        )
+
+
+    def _refresh_preview_delayed(self, *_, delay=300):
+        """Rafraîchit la preview avec un délai (pour les champs texte)."""
+        if hasattr(self, '_refresh_pending_id') and self._refresh_pending_id:
+            try: self.after_cancel(self._refresh_pending_id)
+            except: pass
+        self._refresh_pending_id = self.after(delay, self._refresh_preview)
+
 
     def _get_tmdb(self):
         key = self.tmdb_api_key.get().strip()
@@ -875,6 +1588,7 @@ class App(tk.Tk):
         if self._tmdb is None or self._tmdb.api_key != key:
             self._tmdb = TMDbScraper(key)
         return self._tmdb
+
 
     def _scrape_async(self, search_fn, query, year, callback):
         """Lance la recherche dans un thread pour ne pas bloquer l'UI."""
@@ -885,6 +1599,7 @@ class App(tk.Tk):
             except Exception as exc:
                 self.after(0, lambda: callback(None, str(exc)))
         threading.Thread(target=_run, daemon=True).start()
+
 
     def _scrape_dialog(self, results, mode, files, conv, anime=False):
         """Popup de selection — menus deroulants ergonomiques."""
@@ -987,6 +1702,7 @@ class App(tk.Tk):
             return
         self._apply_scrape_result(chosen['result'], mode, files, conv, anime)
 
+
     def _apply_scrape_result(self, result, mode, files, conv, anime):
         """Applique le résultat scraper pour générer les noms finaux."""
         title  = result['title']
@@ -994,17 +1710,23 @@ class App(tk.Tk):
         tmdb_id = str(result['id'])
         pairs  = []
 
+        # Mettre en cache pour que _refresh_preview puisse rebuilder sans perdre le titre
+        self._scrape_cache = {
+            'title': title, 'year': year, 'id': result['id'],
+            'mode': mode, 'files': files, 'anime': anime
+        }
+
         if mode == 'video_film':
             for fp in files:
                 p   = Path(fp)
                 if conv == 'tmdb':
                     t_dots = engine.safe_filename(title).replace(' ', '.')
-                    new = f"{t_dots}.{year}{p.suffix.lower()}" if year != '?'                           else f"{t_dots}{p.suffix.lower()}"
-                elif conv == 'mediaportal':
-                    new = engine.safe_filename(f"{title}{p.suffix.lower()}")
-                else:  # plex, kodi, infuse
+                    new = f"{t_dots}.{year}{p.suffix.lower()}" if year != '?' \
+                          else f"{t_dots}{p.suffix.lower()}"
+                else:  # plex, kodi, jellyfin, emby — tous: Titre (Année)
                     new = engine.safe_filename(
-                        f"{title} ({year}){p.suffix.lower()}")                         if year != '?' else engine.safe_filename(
+                        f"{title} ({year}){p.suffix.lower()}") \
+                          if year != '?' else engine.safe_filename(
                         f"{title}{p.suffix.lower()}")
                 pairs.append((fp, new))
 
@@ -1014,16 +1736,15 @@ class App(tk.Tk):
                 s, e, e2 = engine.extract_season_episode(p.stem)
                 ep_w = 3 if anime else 2
                 if s is not None and e is not None:
-                    ep_str = f"S{s:02d}E{e:0{ep_w}d}-E{e2:0{ep_w}d}"                              if e2 else f"S{s:02d}E{e:0{ep_w}d}"
+                    ep_str_upper = f"S{s:02d}E{e:0{ep_w}d}-E{e2:0{ep_w}d}" if e2 else f"S{s:02d}E{e:0{ep_w}d}"
+                    ep_str_lower = ep_str_upper.lower()
                     if conv == 'tmdb':
                         t_dots = engine.safe_filename(title).replace(' ', '.')
-                        new = f"{t_dots}.{ep_str}{p.suffix.lower()}"
-                    elif conv == 'kodi':
-                        new = engine.safe_filename(f"{title} {ep_str}{p.suffix.lower()}")
-                    elif conv == 'mediaportal':
-                        new = engine.safe_filename(f"{title}_S{s:02d}E{e:02d}{p.suffix.lower()}")
-                    else:
-                        new = engine.safe_filename(f"{title} - {ep_str}{p.suffix.lower()}")
+                        new = f"{t_dots}.{ep_str_upper}{p.suffix.lower()}"
+                    elif conv == 'plex':
+                        new = engine.safe_filename(f"{title} - {ep_str_lower}{p.suffix.lower()}")
+                    else:  # kodi, jellyfin, emby
+                        new = engine.safe_filename(f"{title} {ep_str_upper}{p.suffix.lower()}")
                 else:
                     new = engine.safe_filename(title + p.suffix.lower())
                 pairs.append((fp, new))
@@ -1083,6 +1804,7 @@ class App(tk.Tk):
             text=f'{len(pairs)} fichier(s)  ·  {count_ok} a renommer')
         self.tree.selection_set(self.tree.get_children())
         self.apply_btn.configure(state='normal' if count_ok > 0 else 'disabled')
+
 
     def _run_scraper(self, mode):
         """Point d'entrée bouton 'Scraper TMDb/AniList'."""
@@ -1165,80 +1887,6 @@ class App(tk.Tk):
 
     # ── Bannière suggestion ───────────────────────────────────────
 
-    def _show_tmdb_banner(self, results, mode, files, conv, anime=False):
-        """Bannière intelligente : menu deroulant + Accepter / Modifier."""
-        ban = self._tmdb_banner
-        for w in ban.winfo_children():
-            w.destroy()
-        if not results:
-            ban.pack_forget()
-            return
-
-        choices    = [f"{r['title']}  ({r['year']})" for r in results]
-        choice_var = tk.StringVar(value=choices[0])
-
-        src_label = {
-            'video_film':  '🎬 TMDb Films',
-            'video_serie': '📺 TMDb Séries',
-            'manga':       '📚 AniList',
-            'book':        '📖 Open Library',
-        }.get(mode, '🔍 TMDb')
-        # Détecter si résultats viennent d'AniList (ont 'romaji' key)
-        if results and results[0].get('romaji') is not None and 'video' in mode:
-            src_label = '🎌 AniList Anime'
-
-        row = tk.Frame(ban, bg='#0a2540')
-        row.pack(fill='x', padx=14, pady=(8,4))
-
-        tk.Label(row, text=src_label, bg='#0a2540',
-            fg=_CYAN, font=F(10, True)).pack(side='left', padx=(0,10))
-
-        opt = tk.OptionMenu(row, choice_var, *choices)
-        opt.configure(
-            font=F(11, True), bg='#0d3060', fg=_TEXT,
-            activebackground='#1a4a7a', activeforeground=_AMBER,
-            highlightthickness=0, relief='flat', bd=0,
-            padx=10, pady=4, anchor='w', indicatoron=True)
-        opt['menu'].configure(
-            font=F(10), bg='#0d3060', fg=_TEXT,
-            activebackground='#1e3a5f', activeforeground=_AMBER,
-            relief='flat', bd=0)
-        opt.pack(side='left', padx=(0,14), fill='x', expand=True)
-
-        def _accept():
-            idx = choices.index(choice_var.get())
-            self._apply_scrape_result(results[idx], mode, files, conv, anime)
-            ban.pack_forget()
-
-        def _edit():
-            idx = choices.index(choice_var.get())
-            self._scrape_edit_popup(results[idx], mode, files, conv, anime)
-
-        BTN(row, '✓ Accepter', _accept,
-            bg=_GREEN, fg=_BG, bold=True, pad=(12,5)).pack(side='left', padx=(0,6))
-        BTN(row, '✎', _edit,
-            bg='#1a4a7a', fg=_TEXT, pad=(8,5)).pack(side='left', padx=(0,6))
-        BTN(row, '✕', ban.pack_forget,
-            bg='#0a2540', fg=_MUTED, pad=(6,5)).pack(side='right')
-
-        info = tk.Frame(ban, bg='#071a30')
-        info.pack(fill='x', padx=14, pady=(0,6))
-        info_lbl = tk.Label(info, text='', bg='#071a30',
-            fg=_MUTED, font=FM(9), anchor='w')
-        info_lbl.pack(anchor='w', pady=2)
-
-        def _upd(*_):
-            idx  = choices.index(choice_var.get())
-            r    = results[idx]
-            orig = r.get('original_title') or r.get('romaji') or r.get('author') or ''
-            txt  = f"ID : {r['id']}"
-            if orig and orig != r['title']:
-                txt += f"   ·   {orig}"
-            info_lbl.configure(text=txt)
-        choice_var.trace_add('write', _upd)
-        _upd()
-
-        ban.pack(fill='x', before=self._tree_frame)
 
     def _scrape_edit_popup(self, result, mode, files, conv, anime):
         """Mini popup pour corriger titre / annee avant d'appliquer."""
@@ -1292,6 +1940,7 @@ class App(tk.Tk):
 
     # ── Scraping automatique unifié ───────────────────────────────
 
+
     def _get_files_for_mode(self, mode_id, folder_path=None):
         """Retourne les fichiers filtrés selon le mode actif."""
         if mode_id == 'video':
@@ -1324,6 +1973,7 @@ class App(tk.Tk):
         if folder_path:
             return self._collect_silent(exts, folder_path)
         return []
+
 
 
     def _do_scrape(self, mode_id, files):
@@ -1446,6 +2096,7 @@ class App(tk.Tk):
                     self.after(0, lambda e=err: self.status_var.set(f'OpenLib erreur : {e}'))
             threading.Thread(target=_run_b, daemon=True).start()
 
+
     def _search_openlibrary(self, query: str) -> list:
         """Recherche Open Library (gratuit, sans cle)."""
         qs  = urllib.parse.urlencode({
@@ -1469,6 +2120,7 @@ class App(tk.Tk):
             })
         return results
 
+
     def _trigger_scrape(self, folder_path, delay=200):
         """Déclenche un scrape dossier avec annulation du précédent pending."""
         if hasattr(self, '_scrape_pending_id') and self._scrape_pending_id:
@@ -1478,6 +2130,7 @@ class App(tk.Tk):
         self._scrape_pending_id = self.after(
             delay, lambda: self._auto_scrape(fp))
 
+
     def _trigger_scrape_files(self, files, delay=200):
         """Déclenche un scrape fichiers avec annulation du précédent pending."""
         if hasattr(self, '_scrape_pending_id') and self._scrape_pending_id:
@@ -1486,6 +2139,7 @@ class App(tk.Tk):
         fl = list(files)  # capture locale
         self._scrape_pending_id = self.after(
             delay, lambda: self._auto_scrape_from_files(fl))
+
 
     def _auto_scrape(self, folder_path):
         """Declenche quand un dossier est selectionne."""
@@ -1497,6 +2151,7 @@ class App(tk.Tk):
         files = self._get_files_for_mode(mode_id, folder_path)
         self._do_scrape(mode_id, files)
 
+
     def _auto_scrape_from_files(self, files):
         """Declenche quand des fichiers sont selectionnes individuellement."""
         if not self.scraper_enabled.get():
@@ -1505,6 +2160,7 @@ class App(tk.Tk):
         if mode_id not in ('video', 'manga', 'book'):
             return
         self._do_scrape(mode_id, files)
+
 
     def _collect_silent(self, exts, folder_path):
         """Collecte fichiers sans popup."""
@@ -1522,593 +2178,15 @@ class App(tk.Tk):
 
     # ── Header ────────────────────────────────────────────────────
 
-    def _build_header(self):
-        hdr = tk.Frame(self, bg=_SURF)
-        hdr.pack(fill='x')
-        inner = tk.Frame(hdr, bg=_SURF)
-        inner.pack(fill='x', padx=20, pady=12)
-
-        # Logo
-        logo_frame = tk.Frame(inner, bg=_SURF)
-        logo_frame.pack(side='left')
-        tk.Label(logo_frame, text='FR', font=F(18, True),
-            fg=_BG, bg=_AMBER, padx=10, pady=2).pack(side='left')
-        tk.Frame(logo_frame, bg=_SURF, width=10).pack(side='left')
-        tk.Label(logo_frame, text='FileRenamer',
-            font=F(16, True), fg=_TEXT, bg=_SURF).pack(side='left')
-        tk.Label(logo_frame, text='  /  Films · Mangas · Livres · Photos',
-            font=F(11), fg=_MUTED, bg=_SURF).pack(side='left', padx=(4,0))
-
-        # Dossier (centré dans le header)
-        folder_frame = tk.Frame(inner, bg=_SURF)
-        folder_frame.pack(side='left', fill='x', expand=True, padx=30)
-
-        row = tk.Frame(folder_frame, bg=_BORDER, highlightthickness=0)
-        row.pack(fill='x')
-        tk.Label(row, text='📁', bg=_BORDER, fg=_AMBER, font=F(12)).pack(
-            side='left', padx=(8,4), pady=4)
-        tk.Entry(row, textvariable=self.folder_var,
-            font=FM(10), bg=_BORDER, fg=_TEXT,
-            insertbackground=_AMBER, relief='flat', bd=0).pack(
-            side='left', fill='x', expand=True, pady=6)
-        BTN(row, '📁 Dossier', self._browse_folder, bg=_AMBER, fg=_BG, bold=True,
-            pad=(10,6)).pack(side='left', padx=(4,2), pady=4)
-        BTN(row, '🎬 Fichiers', self._browse_files, bg=_CARD2, fg=_AMBER, bold=True,
-            pad=(10,6)).pack(side='left', padx=(2,4), pady=4)
-
-        # Options
-        opts = tk.Frame(folder_frame, bg=_SURF)
-        opts.pack(anchor='w', pady=(4,0))
-        CHK(opts, 'Sous-dossiers', self.recursive_var, fg=_CYAN).pack(
-            side='left', padx=(0,16))
-        CHK(opts, 'Renommer le dossier', self.rename_folder_var, fg=_TEAL).pack(
-            side='left')
-
-        # Auto-scrape quand le dossier change (saisie manuelle)
-        def _on_folder_change(*_):
-            d = self.folder_var.get().strip()
-            if d and os.path.isdir(d):
-                self._trigger_scrape(d, delay=700)
-        self.folder_var.trace_add('write', _on_folder_change)
-
-        # Droits admin
-        if sys.platform == 'win32':
-            try:
-                ok = is_admin()
-            except Exception:
-                ok = False
-            adm = tk.Frame(inner, bg=_SURF)
-            adm.pack(side='right')
-            if ok:
-                tk.Label(adm, text='✓ Admin', font=F(10),
-                    fg=_GREEN, bg=_SURF).pack()
-            else:
-                def _rel():
-                    if relaunch_as_admin(): self.destroy()
-                    else: messagebox.showerror('Erreur', 'Clic droit → Exécuter en tant qu\'administrateur')
-                BTN(adm, '⚠ Admin', _rel, bg=_ORANGE, fg=_BG, bold=True).pack()
-
-    # ── Navigation latérale (icônes) ──────────────────────────────
-
-    def _build_nav(self, parent):
-        tk.Frame(parent, bg=_SURF, height=16).pack()
-
-        for mode_id, icon, label in self.MODES:
-            cell = tk.Frame(parent, bg=_SURF, cursor='hand2')
-            cell.pack(fill='x', pady=2)
-
-            indicator = tk.Frame(cell, bg=_SURF, width=3)
-            indicator.pack(side='left', fill='y')
-
-            inner = tk.Frame(cell, bg=_SURF)
-            inner.pack(side='left', fill='both', expand=True)
-
-            icon_lbl = tk.Label(inner, text=icon, font=F(18),
-                fg=_MUTED, bg=_SURF, cursor='hand2')
-            icon_lbl.pack(pady=(10,2))
-
-            name_lbl = tk.Label(inner, text=label.split()[0],
-                font=F(8), fg=_MUTED, bg=_SURF, cursor='hand2')
-            name_lbl.pack(pady=(0,10))
-
-            all_w = [cell, inner, icon_lbl, name_lbl]
-
-            # Clic
-            for w in all_w:
-                w.bind('<Button-1>', lambda e, m=mode_id: self._show_page(m))
-
-            # Hover
-            def _enter(e, ws=all_w):
-                for w in ws:
-                    try: w.configure(bg=_CARD)
-                    except: pass
-            def _leave(e, ws=all_w, m=mode_id):
-                bg = _CARD2 if self._pages.get('_current') == m else _SURF
-                for w in ws:
-                    try: w.configure(bg=bg)
-                    except: pass
-            for w in all_w:
-                w.bind('<Enter>', _enter)
-                w.bind('<Leave>', _leave)
-
-            self._nav_btns[mode_id] = (cell, inner, icon_lbl, name_lbl, indicator)
-
-    def _show_page(self, mode_id):
-        self._pages['_current'] = mode_id
-        self._current_mode = mode_id  # mise à jour immédiate
-        # Déclencher scraping si dossier ou fichiers déjà chargés
-        if mode_id in ('video', 'manga', 'book'):
-            d = self.folder_var.get().strip()
-            if self._selected_files:
-                self._trigger_scrape_files(list(self._selected_files), delay=300)
-            elif d and os.path.isdir(d):
-                self._trigger_scrape(d, delay=300)
-        for pid, page in self._pages.items():
-            if pid == '_current': continue
-            page.place_forget()
-            cell, inner, icon_lbl, name_lbl, ind = self._nav_btns[pid]
-            for w in [cell, inner, icon_lbl, name_lbl]:
-                try: w.configure(bg=_SURF, fg=_MUTED)
-                except: w.configure(bg=_SURF)
-            ind.configure(bg=_SURF)
-
-        self._pages[mode_id].place(x=0, y=0, relwidth=1, relheight=1)
-        cell, inner, icon_lbl, name_lbl, ind = self._nav_btns[mode_id]
-        for w in [cell, inner]:
-            w.configure(bg=_CARD2)
-        icon_lbl.configure(bg=_CARD2, fg=_AMBER)
-        name_lbl.configure(bg=_CARD2, fg=_AMBER2)
-        ind.configure(bg=_AMBER)
-
-    # ── Helpers pages ─────────────────────────────────────────────
-
-    def _sec(self, p, text, color=_AMBER):
-        f = tk.Frame(p, bg=_PANEL)
-        f.pack(fill='x', padx=0, pady=(0,0))
-        row = tk.Frame(f, bg=_CARD)
-        row.pack(fill='x', padx=16, pady=(14,6))
-        tk.Frame(row, bg=color, width=3).pack(side='left', fill='y', padx=(0,8))
-        L(row, text, 10, bold=True, fg=color, bg=_CARD).pack(
-            side='left', anchor='w', pady=4)
-
-    def _hint(self, p, text, color=_MUTED):
-        L(p, text, 9, fg=color, bg=_PANEL, wrap=350).pack(
-            anchor='w', padx=20, pady=(0,6))
-
-    def _field(self, p, label, var, hint=''):
-        row = tk.Frame(p, bg=_CARD2)
-        row.pack(fill='x', padx=16, pady=3)
-        L(row, label, 10, fg=_TEXT2, bg=_CARD2).pack(
-            side='left', padx=(10,8), pady=8)
-        ENT(row, var, width=18).pack(
-            side='left', fill='x', expand=True, padx=(0,8), pady=6)
-        if hint:
-            L(row, hint, 9, fg=_MUTED, bg=_CARD2).pack(side='left', padx=(0,8))
-
-    def _radio(self, p, title, example, var, val, color=_AMBER):
-        CR = _CARD
-        CH = _CARD2
-
-        f = tk.Frame(p, bg=CR, cursor='hand2')
-        f.pack(fill='x', padx=16, pady=3)
-
-        bar = tk.Frame(f, bg=_BORDER, width=3)
-        bar.pack(side='left', fill='y')
-
-        content = tk.Frame(f, bg=CR)
-        content.pack(side='left', fill='both', expand=True, padx=(12,10), pady=10)
-
-        l_t = L(content, title, 11, bold=True, fg=_TEXT, bg=CR)
-        l_t.pack(anchor='w')
-        l_e = LM(content, example, 9, fg=color, bg=CR)
-        l_e.pack(anchor='w', pady=(2,0))
-
-        # Sélection via trace
-        def _refresh(*_):
-            sel = (var.get() == val)
-            _bg = CH if sel else CR
-            bar.configure(bg=color if sel else _BORDER)
-            for w in [f, content, l_t, l_e]:
-                try: w.configure(bg=_bg)
-                except: pass
-            l_t.configure(fg=color if sel else _TEXT)
-
-        var.trace_add('write', _refresh)
-
-        def _click(e=None): var.set(val)
-        for w in [f, bar, content, l_t, l_e]:
-            w.bind('<Button-1>', _click)
-
-        def _enter(e):
-            if var.get() != val:
-                for w in [f, content, l_t, l_e]:
-                    try: w.configure(bg='#131929')
-                    except: pass
-        def _leave(e): _refresh()
-        for w in [f, content, l_t, l_e]:
-            w.bind('<Enter>', _enter)
-            w.bind('<Leave>', _leave)
-
-        _refresh()
-
-    def _fmt(self, p, items):
-        row = tk.Frame(p, bg=_PANEL)
-        row.pack(fill='x', padx=16, pady=6)
-        for text, var, color in items:
-            f = tk.Frame(row, bg=_CARD)
-            f.pack(side='left', padx=3)
-            tk.Checkbutton(f, text=text, variable=var,
-                font=F(10, True), fg=color, bg=_CARD,
-                selectcolor=_CARD, activebackground=_CARD,
-                activeforeground=color, relief='flat', cursor='hand2',
-                padx=10, pady=7).pack()
-
-    def _run_btn(self, p, mode_id, label):
-        f = tk.Frame(p, bg=_PANEL)
-        f.pack(fill='x', padx=16, pady=(12, 16))
-        SEP(f, _BORDER).pack(fill='x', pady=(0, 10))
-        BTN(f, f'  Analyser — {label}  →',
-            lambda: self._run_preview(mode_id),
-            bg=_AMBER, fg=_BG, size=11, bold=True, pad=(0, 10)
-        ).pack(fill='x')
-
-    # ── Pages ─────────────────────────────────────────────────────
-
-    def _build_all_pages(self):
-        for mode_id, _, _ in self.MODES:
-            # Conteneur avec canvas scrollable
-            outer = tk.Frame(self._page_area, bg=_PANEL)
-            self._pages[mode_id] = outer
-
-            canvas = tk.Canvas(outer, bg=_PANEL, highlightthickness=0,
-                               bd=0)
-            sb = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
-            canvas.configure(yscrollcommand=sb.set)
-            sb.pack(side='right', fill='y')
-            canvas.pack(side='left', fill='both', expand=True)
-
-            inner = tk.Frame(canvas, bg=_PANEL)
-            win_id = canvas.create_window((0, 0), window=inner, anchor='nw')
-
-            # Ajuster largeur du frame inner à celle du canvas
-            def _on_canvas_resize(e, c=canvas, w=win_id):
-                c.itemconfig(w, width=e.width)
-            canvas.bind('<Configure>', _on_canvas_resize)
-
-            # Mettre à jour scrollregion quand le contenu change
-            def _on_frame_resize(e, c=canvas):
-                c.configure(scrollregion=c.bbox('all'))
-            inner.bind('<Configure>', _on_frame_resize)
-
-            # Molette souris
-            def _on_wheel(e, c=canvas):
-                c.yview_scroll(int(-1 * (e.delta / 120)), 'units')
-            canvas.bind('<Enter>',
-                lambda e, c=canvas: c.bind_all('<MouseWheel>',
-                    lambda ev, cc=c: cc.yview_scroll(int(-1*(ev.delta/120)),'units')))
-            canvas.bind('<Leave>',
-                lambda e, c=canvas: c.unbind_all('<MouseWheel>'))
-
-            getattr(self, f'_page_{mode_id}')(inner)
-
-    def _page_video(self, p):
-        self._sec(p, 'TYPE DE CONTENU')
-        self._radio(p, 'Film',
-            'ex: Inception (2010).mkv',
-            self.video_mode, 'film', _AMBER)
-        self._radio(p, 'Série TV',
-            'ex: Breaking Bad - S03E07.mkv',
-            self.video_mode, 'serie', _CYAN)
-        self._radio(p, 'Série Animée  (Anime)',
-            'ex: Demon Slayer - S01E007.mkv  — recherche via TMDb + AniList',
-            self.video_mode, 'anime', _PINK)
-
-        # Re-scraper quand on change de type
-        def _on_mode_change(*_):
-            self._tmdb_banner.pack_forget()
-            d = self.folder_var.get().strip()
-            if self._selected_files:
-                self._trigger_scrape_files(list(self._selected_files), delay=200)
-            elif d and os.path.isdir(d):
-                self._trigger_scrape(d, delay=200)
-        self.video_mode.trace_add('write', _on_mode_change)
-
-        self._sec(p, 'CONVENTION MÉDIA', _CYAN)
-        self._radio(p, 'Plex · Emby · Jellyfin',
-            'Titre (2008).mkv  /  Titre - S01E02.mkv',
-            self.video_conv, 'plex', _CYAN)
-        self._radio(p, 'Kodi · XBMC',
-            'Titre (2008).mkv  /  Titre S01E02.mkv',
-            self.video_conv, 'kodi', _TEAL)
-        self._radio(p, 'Infuse · Apple TV',
-            'Titre (2008).mkv  /  Titre - S01E02.mkv',
-            self.video_conv, 'infuse', _GREEN)
-        self._radio(p, 'MediaPortal',
-            'Titre.mkv  /  Titre_S01E02.mkv',
-            self.video_conv, 'mediaportal', _VIOLET)
-        self._radio(p, 'Kodi / LibreELEC  (TMDb)',
-            'Titre.2008.mkv  /  Titre.S01E02.mkv',
-            self.video_conv, 'tmdb', _TEAL)
-
-        self._sec(p, 'OPTIONS')
-        f = tk.Frame(p, bg=_PANEL)
-        f.pack(fill='x', padx=16, pady=4)
-        CHK(f, 'Mode multi-titres (saisir chaque titre manuellement)',
-            self.v_multi_titles, fg=_AMBER).pack(anchor='w', pady=4)
-        CHK(f, 'Ecraser si la destination existe deja',
-            self.v_overwrite, fg=_ORANGE).pack(anchor='w', pady=2)
-
-        self._sec(p, 'FICHIER .NFO  (Kodi/TMDb)', _TEAL)
-        nfo_f = tk.Frame(p, bg=_PANEL)
-        nfo_f.pack(fill='x', padx=16, pady=4)
-        CHK(nfo_f, 'Generer tvshow.nfo / movie.nfo dans le dossier',
-            self.v_nfo, fg=_TEAL).pack(anchor='w', pady=4)
-        self._hint(p, 'Le .nfo force Kodi a utiliser le bon ID TMDb', color=_MUTED)
-        self._field(p, 'ID TMDb :', self.v_tmdb_id, hint='ex: 1396')
-        self._run_btn(p, 'video', 'Films & Séries')
-
-    def _page_manga(self, p):
-        self._sec(p, 'LECTEUR / CONVENTION', _PINK)
-        self._radio(p, 'Kobo  (liseuse)',
-            'ex: One Piece - T042.cbz', self.manga_mode, 'kobo', _PINK)
-        self._radio(p, 'PC · Komga · Kavita',
-            'ex: One Piece v042.cbz', self.manga_mode, 'pc', _CYAN)
-        self._radio(p, 'Mylar3 · ComicRack',
-            'ex: One Piece (1997) #042.cbz', self.manga_mode, 'mylar', _VIOLET)
-
-        self._sec(p, 'NOM DE LA SÉRIE', _PINK)
-        self._hint(p, 'Vide → extrait automatiquement du fichier')
-        self._field(p, 'Série :', self.manga_series, hint='ex: One Piece')
-        self._field(p, 'Année :', self.manga_year,   hint='ex: 1997')
-
-        # Avertissement Mylar : l'année est obligatoire
-        warn_frame = tk.Frame(p, bg=_PANEL)
-        warn_frame.pack(fill='x', padx=16, pady=(0,4))
-        self._mylar_warn = tk.Label(warn_frame,
-            text='⚠  Mylar3 : saisissez l\'annee - obligatoire pour le format (Serie (Annee) #001)',
-            font=F(9), fg=_ORANGE, bg=_PANEL,
-            wraplength=340, justify='left', anchor='w')
-
-        def _check_mylar_warn(*_):
-            if self.manga_mode.get() == 'mylar':
-                self._mylar_warn.pack(anchor='w', pady=2)
-            else:
-                self._mylar_warn.pack_forget()
-        self.manga_mode.trace_add('write', _check_mylar_warn)
-        self.manga_year.trace_add('write', lambda *_: (
-            self._mylar_warn.configure(
-                fg=_GREEN if self.manga_year.get().strip() else _ORANGE,
-                text='\u2713  Annee definie - format complet : Serie (Annee) #001'
-                     if self.manga_year.get().strip()
-                     else '\u26a0  Mylar3 : saisissez l annee - obligatoire pour le format (Serie (Annee) #001)'
-            ) if self.manga_mode.get() == 'mylar' else None
-        ))
-        _check_mylar_warn()
-
-        self._sec(p, 'FORMATS', _PINK)
-        self._fmt(p, [
-            ('CBZ', self.manga_cbz, _PINK),
-            ('CBR', self.manga_cbr, _PINK),
-            ('PDF', self.manga_pdf, _ORANGE),
-            ('EPUB', self.manga_epub, _CYAN),
-        ])
-        def _on_manga_conv(*_):
-            d = self.folder_var.get().strip()
-            if d and os.path.isdir(d):
-                self._tmdb_banner.pack_forget()
-                self.after(300, lambda: self._auto_scrape(d))
-        self.manga_mode.trace_add('write', _on_manga_conv)
-        self._run_btn(p, 'manga', 'Mangas')
-
-    def _page_book(self, p):
-        self._sec(p, 'LOGICIEL / LISEUSE', _TEAL)
-        self._radio(p, 'Calibre',
-            'Tolkien - Le Seigneur des Anneaux (2001).epub',
-            self.book_conv, 'calibre', _AMBER)
-        self._radio(p, 'Kobo  (liseuse)',
-            'Le Seigneur des Anneaux - Tolkien.epub',
-            self.book_conv, 'kobo', _CYAN)
-        self._radio(p, 'Kindle',
-            'Le Seigneur des Anneaux - Tolkien.epub',
-            self.book_conv, 'kindle', _ORANGE)
-        self._radio(p, 'Adobe Digital Editions',
-            'Tolkien - Le Seigneur des Anneaux.epub',
-            self.book_conv, 'adobe', _TEAL)
-
-        self._sec(p, 'INFORMATIONS', _TEAL)
-        self._hint(p, 'Auteur optionnel — extrait automatiquement du nom si vide')
-        self._field(p, 'Auteur :', self.book_author, hint='optionnel')
-
-        self._sec(p, 'FORMATS', _TEAL)
-        self._fmt(p, [
-            ('PDF',  self.book_pdf,  _ORANGE),
-            ('EPUB', self.book_epub, _CYAN),
-            ('MOBI', self.book_mobi, _GREEN),
-            ('DJVU', self.book_djvu, _MUTED),
-        ])
-        # Re-scraper si on change la convention
-        def _on_book_conv(*_):
-            d = self.folder_var.get().strip()
-            if d and os.path.isdir(d):
-                self._tmdb_banner.pack_forget()
-                self.after(300, lambda: self._auto_scrape(d))
-        self.book_conv.trace_add('write', _on_book_conv)
-        self._run_btn(p, 'book', 'Livres & BD')
-
-    def _page_photo(self, p):
-        self._sec(p, 'RENOMMAGE PAR DATE')
-        self._hint(p, 'Résultat : 20231225_143022_vacances.jpg')
-        self._field(p, 'Suffixe :', self.photo_prefix, hint='ex: vacances')
-        f = tk.Frame(p, bg=_PANEL)
-        f.pack(fill='x', padx=16, pady=6)
-        CHK(f, 'Utiliser la date EXIF (prise de vue)', self.photo_exif).pack(
-            anchor='w', pady=6)
-        pil_c = _GREEN if PIL_OK else _ORANGE
-        pil_t = '✓ Pillow installé — EXIF actif' if PIL_OK \
-                else '⚠ Pillow absent — pip install pillow'
-        L(f, pil_t, 9, fg=pil_c, bg=_PANEL).pack(anchor='w', padx=4)
-        self._run_btn(p, 'photo', 'Photos')
-
-    def _page_custom(self, p):
-        self._sec(p, 'MODÈLE DE RENOMMAGE', _VIOLET)
-        self._hint(p,
-            '{titre}  {année}  {ext}  {saison}  {episode}\n'
-            '{tome}  {auteur}  {date}  {prefixe}', color=_CYAN)
-        self._field(p, 'Modèle :', self.custom_template)
-
-        self._sec(p, 'VALEURS', _VIOLET)
-        self._field(p, 'Auteur :',  self.custom_author)
-        self._field(p, 'Préfixe :', self.custom_prefix)
-
-        self._sec(p, 'TYPES DE FICHIERS', _VIOLET)
-        self._fmt(p, [
-            ('Vidéo', self.custom_video, _AMBER),
-            ('Livre', self.custom_book,  _CYAN),
-            ('Manga', self.custom_manga, _PINK),
-            ('Image', self.custom_image, _GREEN),
-        ])
-        self._run_btn(p, 'custom', 'Personnalisé')
-
-
-    def _page_settings(self, p):
-        self._sec(p, 'API TMDB', _CYAN)
-        self._hint(p,
-            'Votre cle API TMDb v3 — gratuite sur themoviedb.org/settings/api',
-            color=_MUTED)
-        self._field(p, 'Cle API :', self.tmdb_api_key)
-
-        # Bouton tester la connexion
-        test_f = tk.Frame(p, bg=_PANEL)
-        test_f.pack(fill='x', padx=16, pady=4)
-        self._api_status = L(test_f, '', 10, fg=_MUTED, bg=_PANEL)
-        self._api_status.pack(anchor='w', pady=(0,6))
-
-        def _test_api():
-            self._api_status.configure(text='Test en cours...', fg=_MUTED)
-            self.update_idletasks()
-            def _run():
-                try:
-                    tmdb = self._get_tmdb()
-                    results = tmdb.search_movie('Inception', '2010')
-                    if results:
-                        self.after(0, lambda: self._api_status.configure(
-                            text=f'OK  Connexion TMDb reussie — {results[0]["title"]} ({results[0]["year"]})',
-                            fg=_GREEN))
-                    else:
-                        self.after(0, lambda: self._api_status.configure(
-                            text='Connexion OK mais aucun resultat', fg=_ORANGE))
-                except Exception as exc:
-                    self.after(0, lambda: self._api_status.configure(
-                        text=f'Erreur : {exc}', fg=_RED))
-            threading.Thread(target=_run, daemon=True).start()
-
-        BTN(test_f, '  Tester la connexion TMDb', _test_api,
-            bg=_CYAN, fg=_BG, bold=True).pack(anchor='w')
-
-        self._sec(p, 'SCRAPER', _CYAN)
-        f = tk.Frame(p, bg=_PANEL)
-        f.pack(fill='x', padx=16, pady=4)
-        CHK(f, 'Activer le scraper TMDb/AniList (necessite internet)',
-            self.scraper_enabled, fg=_CYAN).pack(anchor='w', pady=4)
-        self._hint(p,
-            'Desactive : utilise uniquement le nom de fichier local.',
-            color=_MUTED)
-
-        self._sec(p, 'INFORMATIONS', _MUTED)
-        infos = [
-            ('TMDb API', 'themoviedb.org/settings/api — gratuit'),
-            ('AniList',  'graphql.anilist.co — sans cle, gratuit'),
-            ('Scraper',  'Films · Series · Anime via TMDb'),
-            ('Manga',    'Titres via AniList GraphQL'),
-        ]
-        for k, v in infos:
-            row = tk.Frame(p, bg=_CARD)
-            row.pack(fill='x', padx=16, pady=2)
-            L(row, k, 10, bold=True, fg=_TEXT2, bg=_CARD).pack(
-                side='left', padx=(10,6), pady=6)
-            L(row, v, 10, fg=_MUTED, bg=_CARD).pack(side='left')
-
-    # ── Panneau droit ─────────────────────────────────────────────
-
-    def _build_right(self, parent):
-        # Header preview
-        hdr = tk.Frame(parent, bg=_PANEL)
-        hdr.pack(fill='x')
-        L(hdr, 'PRÉVISUALISATION', 11, bold=True, fg=_AMBER, bg=_PANEL).pack(
-            side='left', padx=16, pady=12)
-        L(hdr, 'double-clic → aperçu', 9, fg=_MUTED, bg=_PANEL).pack(
-            side='left', padx=(0,8))
-        self.count_label = L(hdr, '', 10, fg=_CYAN, bg=_PANEL)
-        self.count_label.pack(side='right', padx=16)
-        tk.Frame(parent, bg=_AMBER, height=1).pack(fill='x')
-
-        # ── Bannière TMDb (masquée par défaut, pack entre header et tree) ─
-        self._tmdb_banner = tk.Frame(parent, bg='#0a2540')
-        # Ne pas packer ici — sera packée via _show_tmdb_banner avant tf
-
-        # Treeview
-        tf = tk.Frame(parent, bg=_SURF)
-        self._tree_frame = tf   # référence pour insertion de la bannière
-        tf.pack(fill='both', expand=True)
-
-        cols = ('avant', 'apres', 'statut')
-        self.tree = ttk.Treeview(tf, columns=cols,
-            show='headings', selectmode='extended')
-        self.tree.heading('avant',  text='  Nom original')
-        self.tree.heading('apres',  text='  Nouveau nom')
-        self.tree.heading('statut', text='Statut')
-        self.tree.column('avant',  width=400, minwidth=180)
-        self.tree.column('apres',  width=400, minwidth=180)
-        self.tree.column('statut', width=130, minwidth=80, anchor='center')
-
-        sb_y = ttk.Scrollbar(tf, orient='vertical',   command=self.tree.yview)
-        sb_x = ttk.Scrollbar(tf, orient='horizontal', command=self.tree.xview)
-        self.tree.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
-        self.tree.grid(row=0, column=0, sticky='nsew')
-        sb_y.grid(row=0, column=1, sticky='ns')
-        sb_x.grid(row=1, column=0, sticky='ew')
-        tf.rowconfigure(0, weight=1)
-        tf.columnconfigure(0, weight=1)
-
-        self.tree.tag_configure('ok',     foreground=_GREEN)
-        self.tree.tag_configure('same',   foreground=_MUTED)
-        self.tree.tag_configure('exists', foreground=_ORANGE)
-        self.tree.tag_configure('done',   foreground=_CYAN)
-        self.tree.tag_configure('error',  foreground=_RED)
-        self.tree.bind('<Double-1>', self._show_preview_popup)
-
-        # Barre actions — 2 lignes
-        tk.Frame(parent, bg=_BORDER, height=1).pack(fill='x')
-        act = tk.Frame(parent, bg=_BG)
-        act.pack(fill='x', padx=12, pady=(6,4))
-
-        row1 = tk.Frame(act, bg=_BG)
-        row1.pack(fill='x', pady=(0,4))
-        self.sel_all_var = tk.BooleanVar(value=True)
-        cb = CHK(row1, '  Tout sélectionner', self.sel_all_var, fg=_AMBER)
-        cb.configure(command=self._toggle_select)
-        cb.pack(side='left', padx=4)
-        BTN(row1, '✕  Effacer', self._clear, bg=_PANEL, fg=_TEXT2).pack(
-            side='left', padx=8)
-        BTN(row1, '↓  Rapport', self._export_log, bg=_PANEL, fg=_TEXT2).pack(
-            side='right', padx=4)
-
-        row2 = tk.Frame(act, bg=_BG)
-        row2.pack(fill='x')
-        self.apply_btn = BTN(row2,
-            '✓  Renommer les fichiers sélectionnés',
-            self._apply, bg=_GREEN, fg=_BG, size=12, bold=True, pad=(0,10))
-        self.apply_btn.pack(fill='x')
-        self.apply_btn.configure(state='disabled')
-
-    # ── Logique ───────────────────────────────────────────────────
 
     def _browse_folder(self):
         d = filedialog.askdirectory(title='Choisir un dossier')
         if d:
             self._selected_files = []
+            self._scrape_cache   = None
             self.folder_var.set(d)   # déclenche trace -> _on_folder_change
             self._trigger_scrape(d)
+
 
     def _browse_files(self):
         files = filedialog.askopenfilenames(
@@ -2129,12 +2207,15 @@ class App(tk.Tk):
         folder = os.path.dirname(files[0])
         self.folder_var.set(folder)
         self._selected_files = list(files)
+        self._scrape_cache   = None
         self.status_var.set(f'{len(files)} fichier(s) selectionne(s)')
         self._trigger_scrape_files(list(files))
+
 
     def _toggle_select(self):
         if self.sel_all_var.get(): self.tree.selection_set(self.tree.get_children())
         else:                       self.tree.selection_remove(self.tree.get_children())
+
 
     def _clear(self):
         self.tree.delete(*self.tree.get_children())
@@ -2144,14 +2225,21 @@ class App(tk.Tk):
         self.apply_btn.configure(state='disabled')
         self.status_var.set('Prêt.')
 
-    def _collect(self, exts):
+    def _clear_with_cache(self):
+        """Efface la preview ET le cache scraper (changement de dossier/mode)."""
+        self._scrape_cache = None
+        self._clear()
+
+
+    def _collect(self, exts, silent=False):
         # Priorité aux fichiers sélectionnés individuellement
         if self._selected_files:
             return [f for f in self._selected_files
                     if Path(f).suffix.lower() in exts]
         folder = self.folder_var.get().strip()
         if not folder or not os.path.isdir(folder):
-            messagebox.showwarning('Dossier invalide', 'Selectionnez un dossier ou des fichiers.')
+            if not silent:
+                messagebox.showwarning('Dossier invalide', 'Selectionnez un dossier ou des fichiers.')
             return []
         files = []
         if self.recursive_var.get():
@@ -2166,14 +2254,15 @@ class App(tk.Tk):
                     files.append(fp)
         return sorted(files)
 
-    def _run_preview(self, mode):
+
+    def _run_preview(self, mode, silent=False):
         self._clear()
         self.status_var.set('Analyse en cours…')
         self.update_idletasks()
         pairs = []
 
         if mode == 'video':
-            files    = self._collect(VIDEO_EXTS)
+            files    = self._collect(VIDEO_EXTS, silent=silent)
             vm       = self.video_mode.get()
             conv     = self.video_conv.get()
             is_film  = (vm == 'film')
@@ -2205,7 +2294,7 @@ class App(tk.Tk):
             if self.manga_cbr.get():  exts.add('.cbr')
             if self.manga_pdf.get():  exts.add('.pdf')
             if self.manga_epub.get(): exts.add('.epub')
-            files = self._collect(exts)
+            files = self._collect(exts, silent=silent)
             mm, s, y = self.manga_mode.get(), self.manga_series.get(), self.manga_year.get()
             mylar_no_year = False
             for fp in files:
@@ -2229,13 +2318,13 @@ class App(tk.Tk):
             if self.book_epub.get(): exts.add('.epub')
             if self.book_mobi.get(): exts.add('.mobi')
             if self.book_djvu.get(): exts.add('.djvu')
-            files = self._collect(exts)
+            files = self._collect(exts, silent=silent)
             au, conv = self.book_author.get(), self.book_conv.get()
             for fp in files:
                 pairs.append((fp, engine.rename_book(os.path.basename(fp), au, conv)))
 
         elif mode == 'photo':
-            files = self._collect(IMAGE_EXTS)
+            files = self._collect(IMAGE_EXTS, silent=silent)
             for fp in files:
                 pairs.append((fp, engine.rename_photo(fp,
                     self.photo_prefix.get(), self.photo_exif.get())))
@@ -2246,7 +2335,7 @@ class App(tk.Tk):
             if self.custom_book.get():  exts |= BOOK_EXTS
             if self.custom_manga.get(): exts |= MANGA_EXTS
             if self.custom_image.get(): exts |= IMAGE_EXTS
-            files = self._collect(exts)
+            files = self._collect(exts, silent=silent)
             tmpl  = self.custom_template.get()
             extra = {'auteur': self.custom_author.get(), 'prefixe': self.custom_prefix.get()}
             for fp in files:
@@ -2276,8 +2365,8 @@ class App(tk.Tk):
 
             if mode == 'video':
                 conv    = self.video_conv.get()
-                is_film = (self.video_mode.get() == 'film_plex')
-                if is_film and conv != 'mediaportal':
+                is_film = (self.video_mode.get() == 'film')
+                if is_film:
                     new_folder = engine.safe_filename(
                         f"{base_title} ({base_year})" if base_year else base_title)
                 else:
@@ -2313,6 +2402,7 @@ class App(tk.Tk):
         self.tree.selection_set(self.tree.get_children())
         self.apply_btn.configure(state='normal' if count_ok > 0 else 'disabled')
         self.status_var.set(f'{n} fichier(s) analysé(s) — {count_ok} à renommer')
+
 
     def _apply(self):
         selected = self.tree.selection()
@@ -2388,6 +2478,7 @@ class App(tk.Tk):
                         if relaunch_as_admin(): self.destroy()
             except: pass
 
+
     def _multi_title_dialog(self, files, conv):
         dlg = tk.Toplevel(self)
         dlg.title('Multi-titres')
@@ -2449,6 +2540,7 @@ class App(tk.Tk):
         dlg.wait_window()
         return result
 
+
     def _show_preview_popup(self, event):
         sel = self.tree.selection()
         if not sel: return
@@ -2490,6 +2582,7 @@ class App(tk.Tk):
             BTN(popup, 'Fermer', popup.destroy, bg=_PANEL).pack(pady=(0,12))
         except Exception as exc:
             messagebox.showwarning('Aperçu', str(exc))
+
 
     def _export_log(self):
         if not self.preview_data:

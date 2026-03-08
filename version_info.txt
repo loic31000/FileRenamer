@@ -1,0 +1,27 @@
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(3, 0, 0, 0),
+    prodvers=(3, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x4,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('040C04B0', [
+        StringStruct('CompanyName', 'loic31000'),
+        StringStruct('FileDescription', 'FileRenamer — Outil de renommage multimédia'),
+        StringStruct('FileVersion', '3.0.0'),
+        StringStruct('InternalName', 'FileRenamer'),
+        StringStruct('LegalCopyright', '© 2026 loic31000'),
+        StringStruct('OriginalFilename', 'FileRenamer.exe'),
+        StringStruct('ProductName', 'FileRenamer'),
+        StringStruct('ProductVersion', '3.0.0'),
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [0x040C, 1200])])
+  ]
+)

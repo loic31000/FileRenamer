@@ -5,6 +5,31 @@ Format : [Keep a Changelog](https://keepachangelog.com/fr/1.0.0/)
 
 ---
 
+
+## [3.0.0] — 2026-03-08
+
+### 🎨 UX / Interface
+- **Refonte navigation** : barre latérale remplacée par onglets horizontaux avec indicateur coloré par mode
+- **Boutons segmentés** : remplace les radio-cards scrollables — type et convention visibles d'un coup
+- **Exemples dynamiques** : le label `→ Titre (2010).mkv` change en temps réel selon type + convention
+- **Panneau options compact** : 304px, tout visible sans scroller
+- **Conventions sur 2 lignes** : lecteurs grand public (Plex/Kodi/Jellyfin/Emby) + outils (TMDb/Sonarr/Radarr)
+- **Bannière scraper redesignée** : badge source coloré, sous-titre ID + titre original
+- **Prévisualisation colorée** : fond par ligne selon statut (vert=prêt, bleu=fait, orange=conflit)
+- **Icône intégrée** : icon.ico embarqué dans le .exe, affiché dans la titlebar et la taskbar
+
+### 🐛 Corrections
+- **Conventions TV corrigées** (sources officielles) :
+  - Plex : `Titre - s01e01.mkv` (tiret + **minuscules**)
+  - Kodi / Jellyfin / Emby : `Titre S01E01.mkv` (pas de tiret)
+  - TMDb/Sonarr : `Titre.S01E01.mkv` (points)
+  - Films : tous → `Titre (2010).mkv` sauf TMDb → `Titre.2010.mkv`
+- **Switch convention en direct** : la prévisualisation se met à jour immédiatement
+- **Cache scraper** : le titre TMDb/AniList est conservé quand on change la convention
+- **Double fermeture** : l'application ne se reouvrait plus après fermeture (double `mainloop()`)
+- **AniList HTTP 400** : champ `french` invalide supprimé de la query GraphQL
+- **Partages réseau** : triple fallback `os.rename` → `shutil.move` → `copy+delete` pour WinError 5
+
 ## [2.0.0] — 2026-03-08
 
 ### ✨ Nouveautés
